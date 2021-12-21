@@ -1,0 +1,304 @@
+  - name: getVpcId
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeSubnets
+      SubnetIds:
+        - '{{SubnetId}}'
+    outputs:
+      - Name: vpcId
+        Selector: '$.Subnets[0].VpcId'
+        Type: String
+    nextStep: getVpcCidr
+  - name: getVpcCidr
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeVpcs
+      VpcIds:
+        - '{{getVpcId.vpcId}}'
+    outputs:
+      - Name: vpcCidr
+        Selector: '$.Vpcs[0].CidrBlock'
+        Type: String
+    nextStep: newAdSg
+  - name: newAdSg
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      Description: 'Security Group for {{RootDomainDNSName}} domain controllers'
+      GroupName: '{{RootDomainDNSName}}-DomainControllers'
+      TagSpecifications:
+        - ResourceType: security-group
+          Tags:
+            - Key: Name
+              Value: '{{RootDomainDNSName}}-DomainControllers'
+      VpcId: '{{getVpcId.vpcId}}'
+    outputs:
+      - Name: sgId
+        Selector: '$.GroupId'
+        Type: String
+    nextStep: adIngress
+  - name: adIngress
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{newAdSg.sgId}}'
+      IpPermissions:
+        - FromPort: 53
+          ToPort: 53
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: DNS
+        - FromPort: 53
+          ToPort: 53
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: DNS
+        - FromPort: 88
+          ToPort: 88
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: Kerberos
+        - FromPort: 88
+          ToPort: 88
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: Kerberos
+        - FromPort: 123
+          ToPort: 123
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: Windows Time
+        - FromPort: 135
+          ToPort: 135
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: RPC and Replication
+        - FromPort: 389
+          ToPort: 389
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: LDAP
+        - FromPort: 389
+          ToPort: 389
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: LDAP
+        - FromPort: 445
+          ToPort: 445
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: SMB
+        - FromPort: 445
+          ToPort: 445
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: SMB
+        - FromPort: 464
+          ToPort: 464
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: Kerberos change/set password
+        - FromPort: 464
+          ToPort: 464
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: Kerberos change/set password
+        - FromPort: 636
+          ToPort: 636
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: LDAP Over SSL
+        - FromPort: 3268
+          ToPort: 3269
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: LDAP GC & LDAP GC Over SSL
+        - FromPort: 3389
+          ToPort: 3389
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: RDP
+        - FromPort: 5722
+          ToPort: 5722
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: RPC DFSR
+        - FromPort: 5985
+          ToPort: 5986
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: WinRM
+        - FromPort: 9389
+          ToPort: 9389
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: SOAP ADWS
+        - FromPort: 49152
+          ToPort: 65535
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: Ephmeral Ports
+        - FromPort: 137
+          ToPort: 138
+          IpProtocol: udp
+          UserIdGroupPairs:
+            - GroupId: '{{newAdSg.sgId}}'
+              Description: NetBIOS
+        - FromPort: 139
+          ToPort: 139
+          IpProtocol: tcp
+          UserIdGroupPairs:
+            - GroupId: '{{newAdSg.sgId}}'
+              Description: NetBIOS
+        - FromPort: 49152
+          ToPort: 65535
+          IpProtocol: udp
+          UserIdGroupPairs:
+            - GroupId: '{{newAdSg.sgId}}'
+              Description: NetBIOS
+
+  - name: caIngress
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{newAdSg.sgId}}'
+      IpPermissions:
+        - FromPort: 135
+          ToPort: 135
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: RPC and Replication
+        - FromPort: 3389
+          ToPort: 3389
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: RDP
+        - FromPort: 5985
+          ToPort: 5986
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: WinRM
+        - FromPort: 49152
+          ToPort: 65535
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{getVpcCidr.vpcCidr}}'
+              Description: Ephmeral Ports
+
+  - name: createSSMInstanceRole
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateRole
+      AssumeRolePolicyDocument: >-
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}
+      RoleName: SSMCore
+    nextStep: attachManagedSSMPolicy
+  - name: attachManagedSSMPolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: 'arn:aws:iam::aws:policy/service-role/AmazonSSMManagedInstanceCore'
+      RoleName: SSMCore
+    nextStep: attachManagedCWPolicy
+  - name: attachManagedCWPolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: 'arn:aws:iam::aws:policy/service-role/CloudWatchAgentServerPolicy'
+      RoleName: SSMCore
+    nextStep: createSSMInstanceProfile
+  - name: createSSMInstanceProfile
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateInstanceProfile
+      InstanceProfileName: SSMCore
+    outputs:
+      - Name: instanceProfileArn
+        Selector: $.InstanceProfile.Arn
+        Type: String
+    nextStep: addSSMInstanceRoleToProfile
+  - name: addSSMInstanceRoleToProfile
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AddRoleToInstanceProfile
+      InstanceProfileName: SSMCore
+      RoleName: SSMCore
+    nextStep: putRolePolicy
+  - name: putRolePolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: PutRolePolicy
+      PolicyDocument: >-
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Resource": [
+                        "{{RootSecretArn}}",
+                        "{{RestoreModeSecretArn}}"
+                    ],
+                    "Action": [
+                        "secretsmanager:DescribeSecret",
+                        "secretsmanager:GetSecretValue"
+                    ]
+                }
+            ]
+        }
+      PolicyName: 'TempSecretAccess{{global:ACCOUNT_ID}}'
+      RoleName: SSMCore
+
+  - name: getVpcId
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeVpcs
+      Filters:  
+      - Name: tag:Name
+        Values: 
+        - 'Utility-VPC'
+    outputs:
+      - Name: vpcId
+        Selector: '$.Vpcs[0].VpcId'
+        Type: String

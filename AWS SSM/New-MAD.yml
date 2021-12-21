@@ -1,0 +1,114 @@
+---
+description: Creates new AWS Managed Microsoft AD.
+schemaVersion: '0.3'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  Description:
+    default: My MAD
+    description: A description for the directory. This label will appear on the AWS console Directory Details page after the directory is created.
+    type: String
+  Edition:
+    allowedValues:
+    - Enterprise
+    - Standard
+    default: Enterprise
+    description: 'AWS Managed Microsoft AD is available in two editions: Standard and Enterprise. Enterprise is the default.'
+    type: String
+  Name:
+    default: corp.example.local
+    description: The fully qualified domain name for the AWS Managed Microsoft AD directory, such as corp.example.com. This name will resolve inside your VPC only. It does not need to be publicly resolvable.
+    type: String
+  SSMPasswordParameterName:
+    default: Password
+    description: The SSM Parameter Store containing the password.  
+    type: String
+  ShortName:
+    default: CORP
+    description: The NetBIOS name for your domain, such as CORP. If you dont specify a NetBIOS name, it will default to the first part of your directory DNS. For example, CORP for the directory DNS corp.example.com.
+    type: String
+  Subnet1Id:
+    default: subnet-0f3d40ba8e84edeee
+    description: The identifiers of the subnets for the directory servers. The two subnets must be in different Availability Zones. AWS Directory Service creates a directory server and a DNS server in each of these subnets.
+    type: String
+  Subnet2Id:
+    default: subnet-003c5ca7637bc3984
+    description: The identifiers of the subnets for the directory servers. The two subnets must be in different Availability Zones. AWS Directory Service creates a directory server and a DNS server in each of these subnets.
+    type: String
+  VpcId:
+    default: vpc-0dfa383fc387eb63d
+    description: The identifier of the VPC in which to create the directory.
+    type: String
+mainSteps:
+  - name: getPassword
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{ SSMPasswordParameterName }}'
+      WithDecryption: true
+    outputs:
+      - Name: password
+        Selector: $.Parameter.Value
+        Type: String
+    nextStep: launchMAD
+  - name: launchMAD
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ds
+      Api: CreateMicrosoftAD
+      Description: '{{ Description }}'
+      Edition: '{{ Edition }}'
+      Name: '{{ Name }}'
+      Password: '{{ getPassword.password }}'
+      ShortName: '{{ ShortName }}'
+      Tags:
+        - Key: Name
+          Value: '{{ Description }}'
+      VpcSettings:
+        VpcId: '{{ VpcId }}'
+        SubnetIds:
+          - '{{ Subnet1Id }}'
+          - '{{ Subnet2Id }}'
+    outputs:
+      - Name: directoryId
+        Selector: '$.DirectoryId'
+        Type: String
+    nextStep: Sleep
+  - name: Sleep
+    action: aws:sleep
+    inputs:
+      Duration: PT5M
+    nextStep: getMadSg
+  - name: getMadSg
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DescribeSecurityGroups
+      Filters:
+        - Name: group-name
+          Values:
+            - '{{ launchMAD.directoryId }}_controllers'
+    outputs:
+      - Name: madSgId
+        Selector: '$.SecurityGroups[0].GroupId'
+        Type: String
+    nextStep: modifyMadSgEgress
+  - name: modifyMadSgEgress
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupEgress
+      GroupId: '{{ getMadSg.madSgId }}'
+      IpPermissions:
+        - FromPort: -1
+          IpProtocol: '-1'
+          IpRanges:
+            - CidrIp: 0.0.0.0/0
+              Description: Allow All Outbound Traffic

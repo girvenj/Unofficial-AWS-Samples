@@ -1,0 +1,257 @@
+---
+description: Creates an additional domain controller.
+schemaVersion: '0.3'
+parameters:
+  AdditionalDCInstanceType:
+    default: t3a.large
+    description: Instance type of the Additional Active Directory Domain Controller
+    type: String
+  AdditionalDCNetBIOSName:
+    default: OpRt-DC02
+    description: NetBIOS name of the Additional Active Directory Domain Controller (up to 15 characters)
+    type: String
+  AdditionalDCPrivateIp:
+    default: 10.255.0.11
+    description: Fixed private IP for the Additional Active Directory Domain Controller
+    type: String
+  AmiNameTag:
+    default: Windows-Server-2019-Full-Template
+    description: Image Name to launch EC2 instance with
+    type: String
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook
+    type: String
+  DaSecretArn:
+    default: arn:aws:secretsmanager:us-west-2:820097935833:secret:DefaultCreds-IsuSDO
+    description: ARN for the Administrator credentials Secret used to join and promote domain controllers
+    type: String
+  DataVolumeSize:
+    default: 10
+    description: Size of the NTDS / SYSVOL Drive
+    type: Integer
+  DomainDNSName:
+    default: onpremises.local
+    description: Fully qualified domain name (FQDN) of the domain you would like to join and promote to e.g. example.com
+    type: String
+  DomainNetBIOSName:
+    default: onpremises
+    description: NetBIOS name of the domain (up to 15 characters) you would like to join and promote to for users of earlier versions of Windows e.g. EXAMPLE
+    type: String
+  ExistingDCPrivateIp:
+    default: 10.255.0.10
+    description: Fixed private IP(s) for an existing additional Active Directory Domain Controller
+    type: String
+  InstanceRoleName:
+    default: SSMCore
+    description: (Optional) Image Name to launch EC2 instance with
+    type: String
+  KeyName:
+    default: Girven-Base
+    description: PEM Keypair
+    type: String
+  KmsKeyId:
+    default: alias/aws/ebs
+    description: KMS Key for EBS Encryption 
+    type: String
+  RestoreModeSecretArn:
+    default: arn:aws:secretsmanager:us-west-2:820097935833:secret:DefaultCreds-IsuSDO
+    description: ARN for the Restore Mode credentials Secret used to promote domain controllers
+    type: String
+  SecurityGroupId:
+    default:
+      - sg-0482d7dc863da9114
+      - sg-092eae60d142c5076
+    description: CIDR block for for VPC where Additional Active Directory Domain Controller will be deployed to
+    type: StringList
+  SubnetId:
+    default: subnet-0f3d40ba8e84edeee
+    description: Subnet ID where Additional Active Directory Domain Controller will be deployed to
+    type: String
+mainSteps:
+  - name: putRolePolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: PutRolePolicy
+      PolicyDocument: >-
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Resource": [
+                        "{{DaSecretArn}}",
+                        "{{RestoreModeSecretArn}}"
+                    ],
+                    "Action": [
+                        "secretsmanager:DescribeSecret",
+                        "secretsmanager:GetSecretValue"
+                    ]
+                }
+            ]
+        }
+      PolicyName: 'TempSecretAccess{{global:ACCOUNT_ID}}'
+      RoleName: '{{InstanceRoleName}}'
+    nextStep: getAmiId
+  - name: getAmiId
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeImages
+      Filters:
+        - Name: 'tag:Name'
+          Values:
+            - '{{AmiNameTag}}'
+    outputs:
+    - Name: amiId
+      Selector: '$.Images[0].ImageId'
+      Type: 'String'
+    nextStep: launchAdditionalDC
+  - name: launchAdditionalDC
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: '{{KmsKeyId}}'
+            VolumeSize: 45
+            VolumeType: gp3
+        - DeviceName: xvdf
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: '{{KmsKeyId}}'
+            VolumeSize: '{{DataVolumeSize}}'
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{InstanceRoleName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{AdditionalDCInstanceType}}'
+      KeyName: '{{KeyName}}'
+      MaxCount: 1
+      MinCount: 1
+      PrivateIpAddress: '{{AdditionalDCPrivateIp}}'
+      SecurityGroupIds:
+        - '{{SecurityGroupId}}'
+      SubnetId: '{{SubnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: '{{AdditionalDCNetBIOSName}}'
+            - Key: Domain
+              Value: '{{DomainDNSName}}'
+            - Key: OS
+              Value: Windows Server 2019 Full
+            - Key: Role
+              Value: Domain Controller
+        - ResourceType: network-interface 
+          Tags:
+            - Key: Name
+              Value: '{{AdditionalDCNetBIOSName}}'
+        - ResourceType: volume 
+          Tags:
+            - Key: Name
+              Value: '{{AdditionalDCNetBIOSName}}'
+    outputs:
+      - Name: AdditionalInstanceId
+        Selector: '$.Instances[0].InstanceId'
+        Type: String
+    nextStep: waitForAdditionalDCBoot
+  - name: waitForAdditionalDCBoot
+    action: aws:sleep
+    inputs:
+      Duration: PT2M
+    nextStep: configureAdditionalDC
+  - name: configureAdditionalDC
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: '/aws/SSMAutomation/AdditionalDC/{{automation:EXECUTION_ID}}'
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{ launchAdditionalDC.AdditionalInstanceId }}'
+      Parameters:
+        commands: |-
+          $Password = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn {{DaSecretArn}}).UserPW
+          Set-LabInstance -ComputerName '{{AdditionalDCNetBIOSName}}' -Role 'AdditionalDomainController' -ExistingDcIp '{{ExistingDCPrivateIp}}' -Password $Password
+    nextStep: waitForAdditionalDCConfigReboot
+  - name: waitForAdditionalDCConfigReboot
+    action: aws:sleep
+    inputs:
+      Duration: PT2M
+    nextStep: promoteAdditionalDC
+  - name: promoteAdditionalDC
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: '/aws/SSMAutomation/AdditionalDC/{{automation:EXECUTION_ID}}'
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchAdditionalDC.AdditionalInstanceId}}'
+      Parameters:
+        commands: |-
+          $SafeModeAdministratorPassword = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn {{RestoreModeSecretArn}}).UserPW
+          $Credentials = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn {{DaSecretArn}}).Credentials
+          Set-DcPromo -Type 'Additional' -DomainName '{{DomainDNSName}}' -SafeModeAdministratorPassword $SafeModeAdministratorPassword -Credentials $Credentials -NetbiosName '{{DomainNetBIOSName}}'
+    nextStep: waitForAdditionalDCPromo
+  - name: waitForAdditionalDCPromo
+    action: aws:sleep
+    inputs:
+      Duration: PT10M
+    nextStep: postAdditionalDCPromo
+  - name: postAdditionalDCPromo
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: '/aws/SSMAutomation/AdditionalDC/{{automation:EXECUTION_ID}}'
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchAdditionalDC.AdditionalInstanceId}}'
+      Parameters:
+        commands: |-
+          Set-PostDcPromo
+    nextStep: runDsc
+  - name: runDsc
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/RootDC/{{automation:EXECUTION_ID}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchAdditionalDC.AdditionalInstanceId}}'
+      Parameters:
+        commands: |-
+          & C:\Scripts\Set-DscConfiguration.ps1
+          Invoke-DscStatusCheck
+    nextStep: deleteRolePolicy
+  - name: deleteRolePolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRolePolicy
+      PolicyName: 'TempSecretAccess{{global:ACCOUNT_ID}}'
+      RoleName: '{{InstanceRoleName}}'
+  - name: addPatchingTag
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateTags
+      Resources:
+        - '{{launchAdditionalDC.AdditionalInstanceId}}'
+      Tags:
+        - Key: Patch Group
+          Value: Patches-All-DailyCheck

@@ -1,0 +1,386 @@
+---
+description: Creates a root Microsoft AD Domain with 1 domain controller.
+schemaVersion: '0.3'
+parameters:
+  AmiNameTag:
+    default: Windows-Server-2019-Full-Template
+    description: Image Name to launch EC2 instance with.
+    type: String
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  CaInstanceType:
+    default: t3a.large
+    description: Instance type of the CAs
+    type: String
+  CaSecretArn:
+    default: arn:aws:secretsmanager:us-west-2:820097935833:secret:DefaultCreds-IsuSDO
+    description: ARN for the Administrator credentials Secret used to deploy CAs
+    type: String
+  DCPrivateIp:
+    default: 10.255.0.10
+    description: IPs of existing Active Directory Domain Controller
+    minItems: 1
+    type: StringList
+  DataVolumeSize:
+    default: 10
+    description: Size of the data drive
+    type: Integer
+  DirectoryType:
+    allowedValues:
+      - AWSManaged
+      - SelfManaged
+    default: SelfManaged
+    description: Type of Active Directory Sub Enterpise CA will be integrated with, AWS Managed Microsoft AD or Self Managed AD
+    type: String
+  DomainDNSName:
+    default: onpremises.local
+    description: Fully qualified domain name (FQDN) of the domain you would like to join to e.g. example.com
+    type: String
+  DomainNetBIOSName:
+    default: onpremises
+    description: NetBIOS name of the domain (up to 15 characters) you would like to join to for users of earlier versions of Windows e.g. EXAMPLE
+    type: String
+  InstanceRoleName:
+    default: SSMCore
+    description: Instance Role Name to launch EC2 instance with
+    type: String
+  OrCaHashAlgorithm:
+    allowedValues:
+      - SHA256
+      - SHA384
+      - SHA512
+    default: SHA512
+    description: Offline Root CA Hash Algorithm for Siging Certificates
+    type: String
+  OrCaKeyLength:
+    allowedValues:
+      - '2048'
+      - '4096'
+    default: '4096'
+    description: Offline Root CA Cryptographic Provider Key Length
+    type: String
+  OrCaNetBIOSName:
+    default: OpRt-ORCA01
+    description: NetBIOS name of the Offline Root CA (up to 15 characters)
+    type: String
+  OrCaPrivateIp:
+    default: 10.255.0.10
+    description: Fixed private IP for the Offline Root CA
+    type: String
+  OrCaValidityPeriodUnits:
+    default: '10'
+    description: Length in years for the Offline Root CA Ceritificate
+    type: String
+  S3CRLBucketName:
+    default: example-local
+    description: S3 bucket name for CAs CRL storage
+    type: String
+  SecurityGroupId:
+    default:
+      - sg-0482d7dc863da9114
+      - sg-092eae60d142c5076
+    description: Security Group the CAs will use
+    type: StringList
+  SubCaHashAlgorithm:
+    allowedValues:
+      - SHA256
+      - SHA384
+      - SHA512
+    default: SHA512
+    description: Sub Enterpise CA Hash Algorithm for Siging Certificates
+    type: String
+  SubCaKeyLength:
+    allowedValues:
+      - '2048'
+      - '4096'
+    default: '4096'
+    description: Sub Enterpise CA Cryptographic Provider Key Length
+    type: String
+  SubCaNetBIOSName:
+    default: OpRt-ECA01
+    description: NetBIOS name of the Sub Enterpise CA (up to 15 characters)
+    type: String
+  SubCaPrivateIp:
+    default: 10.255.0.10
+    description: Fixed private IP for the Sub Enterpise CA
+    type: String
+  SubCaValidityPeriodUnits:
+    default: '5'
+    description: Length in years for the Sub Enterpise CA Ceritificate
+    type: String
+  SubnetId:
+    default: subnet-0f3d40ba8e84edeee
+    description: Subnet ID where CAs will be deployed to
+    type: String
+  UseS3ForCRL:
+    allowedValues:
+      - 'Yes'
+      - 'No'
+    default: 'Yes'
+    description: Store CAs CRL in an S3 bucket?
+    type: String
+  VPCCIDR:
+    default: 10.255.0.0/24
+    description: CIDR block for the VPC where the CAs will be deployed to
+    type: String
+mainSteps:
+  - name: putRolePolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: PutRolePolicy
+      PolicyDocument: >-
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Resource": [
+                        "{{CaSecretArn}}"
+                    ],
+                    "Action": [
+                        "secretsmanager:DescribeSecret",
+                        "secretsmanager:GetSecretValue"
+                    ]
+                }
+            ]
+        }
+      PolicyName: 'TempSecretAccess{{global:ACCOUNT_ID}}'
+      RoleName: '{{InstanceRoleName}}'
+    nextStep: getAmiId
+  - name: getAmiId
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeImages
+      Filters:  
+      - Name: tag:Name
+        Values: 
+        - '{{AmiNameTag}}'
+    outputs:
+      - Name: amiId
+        Selector: '$.Images[0].ImageId'
+        Type: String
+    nextStep: launchOrCa
+  - name: launchOrCa
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            VolumeSize: 45
+            VolumeType: gp3
+        - DeviceName: xvdf
+          Ebs:
+            DeleteOnTermination: true
+            VolumeSize: '{{DataVolumeSize}}'
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{InstanceRoleName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{CaInstanceType}}'
+      MaxCount: 1
+      MinCount: 1
+      PrivateIpAddress: '{{OrCaPrivateIp}}'
+      SecurityGroupIds:
+        - '{{SecurityGroupId}}'
+      SubnetId: '{{SubnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: '{{OrCaNetBIOSName}}'
+            - Key: Environment
+              Value: Production
+            - Key: OS
+              Value: Windows Server 2019 Full
+            - Key: Role
+              Value: Offline Root CA
+        - ResourceType: network-interface 
+          Tags:
+            - Key: Name
+              Value: '{{OrCaNetBIOSName}}'
+        - ResourceType: volume 
+          Tags:
+            - Key: Name
+              Value: '{{OrCaNetBIOSName}}'
+    outputs:
+      - Name: InstanceId
+        Selector: '$.Instances[0].InstanceId'
+        Type: String
+    nextStep: launchEntCa
+  - name: launchEntCa
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            VolumeSize: 45
+            VolumeType: gp3
+        - DeviceName: xvdf
+          Ebs:
+            DeleteOnTermination: true
+            VolumeSize: '{{DataVolumeSize}}'
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{InstanceRoleName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{CaInstanceType}}'
+      MaxCount: 1
+      MinCount: 1
+      PrivateIpAddress: '{{SubCaPrivateIp}}'
+      SecurityGroupIds:
+        - '{{SecurityGroupId}}'
+      SubnetId: '{{SubnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: '{{SubCaNetBIOSName}}'
+            - Key: Domain
+              Value: '{{DomainDNSName}}'
+            - Key: Environment
+              Value: Production
+            - Key: OS
+              Value: Windows Server 2019 Full
+            - Key: Role
+              Value: Enterprise CA
+        - ResourceType: network-interface 
+          Tags:
+            - Key: Name
+              Value: '{{SubCaNetBIOSName}}'
+        - ResourceType: volume 
+          Tags:
+            - Key: Name
+              Value: '{{SubCaNetBIOSName}}'
+    outputs:
+      - Name: InstanceId
+        Selector: '$.Instances[0].InstanceId'
+        Type: String
+    nextStep: configureOrCaOs
+  - name: configureOrCaOs
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{ automation:EXECUTION_ID }}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchOrCa.InstanceId}}'
+      Parameters:
+        commands: |-
+          $Password = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{CaSecretArn}}').UserPW
+          Set-LabInstance -ComputerName '{{OrCaNetBIOSName}}' -ExistingDcIp '{{DCPrivateIp}}' -Password $Password -Role 'MemberServer' 
+    nextStep: configureEntCaOs
+  - name: configureEntCaOs
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{ automation:EXECUTION_ID }}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchEntCa.InstanceId}}'
+      Parameters:
+        commands: |-
+          $Password = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{CaSecretArn}}').UserPW
+          Set-LabInstance -ComputerName '{{SubCaNetBIOSName}}' -ExistingDcIp '{{DCPrivateIp}}' -Password $Password -Role 'MemberServer' 
+    nextStep: waitForEntCaConfigReboot
+  - name: waitForEntCaConfigReboot
+    action: aws:sleep
+    inputs:
+      Duration: PT2M
+    nextStep: joinEntCa
+  - name: joinEntCa
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{ automation:EXECUTION_ID }}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchEntCa.InstanceId}}'
+      Parameters:
+        commands: |-
+          $Credentials = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{CaSecretArn}}').Credentials
+          Invoke-JoinDomain -Credentials $Credentials -FQDN '{{DomainDNSName}}'
+    nextStep: configureOrCa
+  - name: configureOrCa
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{ automation:EXECUTION_ID }}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchOrCa.InstanceId}}'
+      Parameters:
+        commands: |-
+          $Credentials = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{CaSecretArn}}').Credentials
+          Invoke-OfflineCaConfig -Credentials $Credentials -DirectoryType '{{DirectoryType}}' -DomainDNSName '{{DomainDNSName}}' -OrCaCommonName '{{SubCaNetBIOSName}}' -OrCaHashAlgorithm '{{OrCaHashAlgorithm}}' -OrCaKeyLength '{{OrCaKeyLength}}' -OrCaValidityPeriodUnits '{{OrCaValidityPeriodUnits}}' -S3CRLBucketName '{{S3CRLBucketName}}' -SubCaServerNetBIOSName '{{SubCaNetBIOSName}}' -UseS3ForCRL '{{UseS3ForCRL}}' -VPCCIDR '{{VPCCIDR}}'
+    nextStep: preConfigureSubCa
+  - name: preConfigureSubCa
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{ automation:EXECUTION_ID }}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchEntCa.InstanceId}}'
+      Parameters:
+        commands: |-
+          $Credentials = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{CaSecretArn}}').Credentials
+          Invoke-SubCaPreConfig -Credentials $Credentials -DirectoryType '{{DirectoryType}}' -DomainDNSName '{{DomainDNSName}}' -SubCaCommonName '{{SubCaNetBIOSName}}' -SubCaHashAlgorithm '{{SubCaHashAlgorithm}}' -SubCaKeyLength '{{SubCaKeyLength}}' -SubCaValidityPeriodUnits '{{SubCaValidityPeriodUnits}}' -S3CRLBucketName '{{S3CRLBucketName}}' -UseS3ForCRL '{{UseS3ForCRL}}'
+    nextStep: issueCaCert
+  - name: issueCaCert
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{ automation:EXECUTION_ID }}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchOrCa.InstanceId}}'
+      Parameters:
+        commands: |-
+          $Credentials = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{CaSecretArn}}').Credentials
+          Invoke-TwoTierSubCaCertIssue -Credentials $Credentials -DirectoryType '{{DirectoryType}}'' -DomainDNSName '{{DomainDNSName}}'
+    nextStep: configureOrCa
+  - name: configureOrCa
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{ automation:EXECUTION_ID }}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchEntCa.InstanceId}}'
+      Parameters:
+        commands: |-
+          $Credentials = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{CaSecretArn}}').Credentials
+          Invoke-TwoTierSubCaCertIssue -Credentials $Credentials -DirectoryType '{{DirectoryType}}' -S3CRLBucketName '{{S3CRLBucketName}}' -UseS3ForCRL '{{UseS3ForCRL}}' -VPCCIDR '{{VPCCIDR}}'
+    nextStep: addPatchingTag
+  - name: addPatchingTag
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateTags
+      Resources:
+        - '{{launchEntCa.InstanceId}}'
+        - '{{launchOrCa.InstanceId}}'
+      Tags:
+        - Key: Patch Group
+          Value: Patches-All-DailyCheck

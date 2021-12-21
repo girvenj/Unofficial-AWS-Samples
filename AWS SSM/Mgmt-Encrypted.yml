@@ -1,0 +1,254 @@
+---
+description: Creates a Mgmt Instance for MAD.
+schemaVersion: '0.3'
+parameters:
+  AmiNameTag:
+    default: Windows-Server-2019-Full-Template
+    description: Image Name to launch EC2 instance with.
+    type: String
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  DCPrivateIp:
+    default: 10.255.0.10, 10.255.0.2
+    description: IPs of existing Active Directory Domain Controller comma sepparate if more then one is listed
+    type: String
+  DataVolumeSize:
+    default: 10
+    description: Size of the data drive
+    type: Integer
+  DomainDNSName:
+    default: onpremises.local
+    description: Fully qualified domain name (FQDN) of the domain you would like to join to e.g. example.com
+    type: String
+  DomainNetBIOSName:
+    default: onpremises
+    description: NetBIOS name of the domain (up to 15 characters) you would like to join to for users of earlier versions of Windows e.g. EXAMPLE
+    type: String
+  InstanceRoleName:
+    default: SSMCore
+    description: Instance Role Name to launch EC2 instance with
+    type: String
+  InstanceType:
+    default: t3a.large
+    description: Instance type of the Instance
+    type: String
+  KeyName:
+    default: Girven-Base
+    description: PEM Keypair
+    type: String
+  KmsKeyId:
+    default: alias/aws/ebs
+    description: KMS Key for EBS Encryption 
+    type: String
+  MgmtNetBIOSName:
+    default: MGMT01
+    description: NetBIOS name of the Instance (up to 15 characters)
+    type: String
+  SecurityGroupId:
+    default:
+      - sg-0482d7dc863da9114
+      - sg-092eae60d142c5076
+    description: Security Group the Instance will use
+    type: StringList
+  SubnetId:
+    default: subnet-0f3d40ba8e84edeee
+    description: Subnet ID where Instance will be deployed to
+    type: String
+mainSteps:
+  - name: getVpcId
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeSubnets
+      SubnetIds:
+        - '{{SubnetId}}'
+    outputs:
+      - Name: vpcId
+        Selector: '$.Subnets[0].VpcId'
+        Type: String
+    nextStep: getVpcCidr
+  - name: getVpcCidr
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeVpcs
+      VpcIds:
+        - '{{getVpcId.vpcId}}'
+    outputs:
+      - Name: vpcCidr
+        Selector: '$.Vpcs[0].CidrBlock'
+        Type: String
+    nextStep: putRolePolicy
+  - name: putRolePolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: PutRolePolicy
+      PolicyDocument: >-
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Resource": [
+                        "{{EntCaSecretArn}}"
+                    ],
+                    "Action": [
+                        "secretsmanager:DescribeSecret",
+                        "secretsmanager:GetSecretValue"
+                    ]
+                }
+            ]
+        }
+      PolicyName: 'TempSecretAccess{{global:ACCOUNT_ID}}'
+      RoleName: '{{InstanceRoleName}}'
+    nextStep: getAmiId
+  - name: getAmiId
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeImages
+      Filters:  
+      - Name: tag:Name
+        Values: 
+        - '{{AmiNameTag}}'
+    outputs:
+      - Name: amiId
+        Selector: '$.Images[0].ImageId'
+        Type: String
+    nextStep: launchInstance
+  - name: launchInstance
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: '{{KmsKeyId}}'
+            VolumeSize: 45
+            VolumeType: gp3
+        - DeviceName: xvdf
+          Ebs:
+            Encrypted: true
+            KmsKeyId: '{{KmsKeyId}}'
+            DeleteOnTermination: true
+            VolumeSize: '{{DataVolumeSize}}'
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{InstanceRoleName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{InstanceType}}'
+      KeyName: '{{KeyName}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{SecurityGroupId}}'
+      SubnetId: '{{SubnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: '{{MgmtNetBIOSName}}'
+            - Key: Domain
+              Value: '{{DomainDNSName}}'
+            - Key: Environment
+              Value: Production
+            - Key: OS
+              Value: Windows Server 2019 Full
+            - Key: Role
+              Value: Mgmt Instance
+        - ResourceType: network-interface 
+          Tags:
+            - Key: Name
+              Value: '{{MgmtNetBIOSName}}'
+        - ResourceType: volume 
+          Tags:
+            - Key: Name
+              Value: '{{MgmtNetBIOSName}}'
+    outputs:
+      - Name: InstanceId
+        Selector: '$.Instances[0].InstanceId'
+        Type: String
+    nextStep: waitForBoot
+  - name: waitForBoot
+    action: aws:sleep
+    inputs:
+      Duration: PT2M
+    nextStep: configureOs
+  - name: configureOs
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{automation:EXECUTION_ID}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{ launchInstance.InstanceId }}'
+      Parameters:
+        commands: |-
+          $Password = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{EntCaSecretArn}}').UserPW
+          Set-LabInstance -ComputerName '{{MgmtNetBIOSName}}' -ExistingDcIp '{{DCPrivateIp}}' -Password $Password -Role 'MemberServer' 
+    nextStep: waitForConfigReboot
+  - name: waitForConfigReboot
+    action: aws:sleep
+    inputs:
+      Duration: PT2M
+    nextStep: joinDomain
+  - name: joinDomain
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{automation:EXECUTION_ID}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{ launchInstance.InstanceId }}'
+      Parameters:
+        commands: |-
+          $Credentials = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{EntCaSecretArn}}').Credentials
+          Invoke-JoinDomain -Credentials $Credentials -FQDN '{{DomainDNSName}}'
+    nextStep: postJoinDomain
+  - name: postJoinDomain
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/EntCa/{{automation:EXECUTION_ID}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{ launchInstance.InstanceId }}'
+      Parameters:
+        commands: |-
+          Set-PostMadPromo
+          $Credentials = (Get-SecretCreds -DomainNetBIOSName '{{DomainNetBIOSName}}' -SecretArn '{{EntCaSecretArn}}').Credentials
+          Set-PostMadPromo
+    nextStep: deleteRolePolicy
+  - name: deleteRolePolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRolePolicy
+      PolicyName: TempSecretAccess{{global:ACCOUNT_ID}}
+      RoleName: '{{InstanceRoleName}}'
+    nextStep: addPatchingTag
+  - name: addPatchingTag
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateTags
+      Resources:
+        - '{{launchInstance.InstanceId}}'
+      Tags:
+        - Key: Patch Group
+          Value: Patches-All-DailyCheck

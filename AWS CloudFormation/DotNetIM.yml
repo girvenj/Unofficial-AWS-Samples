@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: 2010-09-09
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Amazon EC2 Configuration
+        Parameters:
+          - AMI
+          - InstanceType
+          - EEKeyPair
+          - AwsCliUrl
+          - NotePadUrl
+          - VSCodeUrl
+          - VSUrl
+    ParameterLabels:
+      AMI:
+        default: AMI ID
+      AwsCliUrl:
+        default: URL location to download AWS CLI
+      InstanceType:
+        default: Instance Type
+      EEKeyPair:
+        default: Key Pair Name
+      NotePadUrl:
+        default: URL location to download NotePad ++
+      VSCodeUrl:
+        default: URL location to download Visual Studio Code
+      VSUrl:
+        default: URL location to download Visual Studio Community Edition
+Parameters:
+  AMI:
+    Default: /aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+  AwsCliUrl:
+    Default: https://awscli.amazonaws.com/AWSCLIV2.msi
+    Type: String
+  InstanceType:
+    AllowedValues:
+      - t3a.large
+      - t3.large
+      - m5.large
+      - m5a.large
+    Default: m5.large
+    Type: String
+  EEKeyPair:
+    Default: ee-default-keypair
+    Type: AWS::EC2::KeyPair::KeyName
+  NotePadUrl:
+    Default: https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v7.9.5/npp.7.9.5.Installer.x64.exe
+    Type: String
+  VSCodeUrl:
+    Default: https://code.visualstudio.com/sha/download?build=stable&os=win32-x64
+    Type: String
+  VSUrl:
+    Default: https://download.visualstudio.microsoft.com/download/pr/1fbe074b-8ae1-4e9b-8e83-d1ce4200c9d1/2b2193b7736ec159b431aef7e7786f4084fba68921019577dc60ddc88308d18c/vs_Community.exe
+    Type: String
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} VPC
+  InternetGW:
+    Type: AWS::EC2::InternetGateway
+  InternetGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGW
+      VpcId: !Ref VPC
+  InternetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGWAttachment
+    Properties:
+      RouteTableId: !Ref InternetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGW
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+  PublicRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref InternetRouteTable
+      SubnetId: !Ref PublicSubnet
+  VSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Sid: ""
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+  VSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DependsOn: [VSInstanceRole]
+    Properties:
+      Roles: [!Ref VSInstanceRole]
+  RDPAccess:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow RDP connections from the outside world
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+          Description: AllowRDP
+  VSInstance:
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+        Count: 1
+    Type: AWS::EC2::Instance
+    DependsOn: [VSInstanceProfile, RDPAccess, VPC, PublicSubnet]
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 60
+            VolumeType: gp3
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref EEKeyPair
+      ImageId: !Ref AMI
+      IamInstanceProfile: !Ref VSInstanceProfile
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!GetAtt RDPAccess.GroupId]
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-DevBox
+      UserData: 
+        Fn::Base64: !Sub |
+          <powershell>
+          Try {
+            New-Item -Type 'Directory' -Path 'C:\Temp' -ErrorAction Stop
+
+            $source = '${NotePadUrl}'
+            $destination = 'C:\temp\npp.Installer.x64.exe'
+            Invoke-WebRequest -Uri $source -OutFile $destination -ErrorAction Stop
+            Start-Process -FilePath 'C:\temp\npp.Installer.x64.exe' -ArgumentList '/S' -Wait -NoNewWindow -ErrorAction Stop
+
+            $source = '${AwsCliUrl}'
+            $destination = 'C:\temp\AwsCli.msi'
+            Invoke-WebRequest -Uri $source -OutFile $destination -ErrorAction Stop
+            Start-Process -FilePath 'msiexec.exe' -ArgumentList '/I C:\temp\AwsCli.msi /quiet' -Wait -NoNewWindow -ErrorAction Stop
+
+            $source = '${VSCodeUrl}'
+            $destination = 'C:\temp\VsCode.exe'
+            Invoke-WebRequest -Uri $source -OutFile $destination -ErrorAction Stop
+            Start-Process -FilePath 'C:\temp\VsCode.exe' -ArgumentList '/VERYSILENT /MERGETASKS=!runcode' -Wait -NoNewWindow -ErrorAction Stop
+
+            $source = '${VSUrl}'
+            $destination = 'C:\temp\vs_Community.exe'
+            Invoke-WebRequest -Uri $source -OutFile $destination -ErrorAction Stop
+            Start-Process -FilePath 'C:\Temp\vs_Community.exe' -ArgumentList '--add Microsoft.VisualStudio.Workload.NetWeb --add Microsoft.VisualStudio.Workload.Azure --add Microsoft.VisualStudio.Workload.NetCoreTools --includeRecommended --quiet --norestart --wait' -Wait -NoNewWindow -ErrorAction Stop
+          } Catch [System.Exception] {
+            cfn-signal.exe --success 'false' --stack ${AWS::StackId} --resource VSInstance --region ${AWS::Region}
+            Exit 1
+          }
+          cfn-signal.exe --success 'true' --stack ${AWS::StackId} --resource VSInstance --region ${AWS::Region}
+          </powershell>

@@ -1,0 +1,218 @@
+---
+description: Creates a single instance and joins it to an AWS Managed Microsoft AD
+schemaVersion: '0.3'
+parameters:
+  AmiName:
+    default: /aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base
+    description: Image Name to launch EC2 instance with
+    type: String
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook
+    type: String
+  DirectoryId:
+    description: (Required) The ID of the AWS Directory Service directory
+    type: String
+  InstanceType:
+    default: t3a.large
+    description: Instance type
+    type: String
+  KeyName:
+    description: PEM Key
+    type: String
+  SecretArn:
+    description: (Required) ARN for the Administrator credentials Secret used to deploy instance
+    type: String
+  NetBIOSName:
+    description: (Required) NetBIOS name of the instance (up to 15 characters)
+    type: String
+  InstanceRoleName:
+    description: (Required) Instance Role Name to launch EC2 instance with
+    type: String
+  SecurityGroupId:
+    description: Security Group the instance will use
+    type: StringList
+  SubnetId:
+    description: Subnet ID where instance will be deployed to
+    type: String
+mainSteps:
+  - name: putRolePolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: PutRolePolicy
+      PolicyDocument: >-
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Resource": [
+                        "{{SecretArn}}"
+                    ],
+                    "Action": [
+                        "secretsmanager:DescribeSecret",
+                        "secretsmanager:GetSecretValue"
+                    ]
+                }
+            ]
+        }
+      PolicyName: 'TempSecretAccess{{global:ACCOUNT_ID}}'
+      RoleName: '{{InstanceRoleName}}'
+    nextStep: getAmiId
+  - name: getAmiId
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{AmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String
+    nextStep: launchInstance
+  - name: launchInstance
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            VolumeSize: 45
+            VolumeType: gp3
+        - DeviceName: xvdf
+          Ebs:
+            DeleteOnTermination: true
+            VolumeSize: 45
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{InstanceRoleName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{InstanceType}}'
+      KeyName: '{{KeyName}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{SecurityGroupId}}'
+      SubnetId: '{{SubnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: '{{NetBIOSName}}'
+        - ResourceType: network-interface 
+          Tags:
+            - Key: Name
+              Value: '{{NetBIOSName}}'
+        - ResourceType: volume 
+          Tags:
+            - Key: Name
+              Value: '{{NetBIOSName}}'
+    outputs:
+      - Name: InstanceId
+        Selector: '$.Instances[0].InstanceId'
+        Type: String
+    nextStep: waitForBoot
+  - name: waitForBoot
+    action: aws:sleep
+    inputs:
+      Duration: PT2M
+    nextStep: renameComputer
+  - name: renameComputer
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/Example/{{automation:EXECUTION_ID}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          $ComputerName = '{{NetBIOSName}}'
+          If ($ComputerName -ne $env:COMPUTERNAME) {
+              Write-Ouptut "Renaming computer to $ComputerName"
+              Try {
+                  Rename-Computer -NewName $ComputerName -Force -ErrorAction Stop
+                  Exit 3010
+              } Catch [System.Exception] {
+                  Write-Output "Failed to rename computer $_"
+                  Exit 1
+              }
+          }
+    nextStep: getDirectoryInfo
+  - name: getDirectoryInfo
+    action: aws:executeAwsApi
+    inputs:
+      Service: ds
+      Api: DescribeDirectories
+      DirectoryIds: 
+        - '{{DirectoryId}}'
+    outputs:
+      - Name: dnsIp1
+        Selector: '$.DirectoryDescriptions[0].DnsIpAddrs[0]'
+        Type: String
+      - Name: dnsIp2
+        Selector: '$.DirectoryDescriptions[0].DnsIpAddrs[1]'
+        Type: String
+      - Name: fQDN
+        Selector: '$.DirectoryDescriptions[0].Name'
+        Type: String
+    nextStep: joinInstance
+  - name: joinInstance
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/Example/{{automation:EXECUTION_ID}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          $SecretArn = '{{SecretArn}}'
+          $DomainNetBIOSName = '{{getDirectoryInfo.fQDN}}'
+          Try {
+              $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+          } Catch [System.Exception] {
+              Write-Output "Failed to get $SecretArn Secret $_"
+              Exit 1
+          }
+          $Username = $SecretContent.Username
+          $UserPW = ConvertTo-SecureString ($SecretContent.Password) -AsPlainText -Force
+          $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$DomainNetBIOSName\$Username", $UserPW)
+
+          Try {
+              Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ServerAddresses '{{getDirectoryInfo.dnsIp1}}','{{getDirectoryInfo.dnsIp2}}' -ErrorAction Stop
+          } Catch [System.Exception] {
+              Write-ToLog -InvocationName $ServiceName -LogData "Failed to set DNS client information $_" -Severity 'ERROR'
+              Exit 1
+          }
+
+          $GetDomainMembership = Get-CimInstance -ClassName 'Win32_ComputerSystem' | Select-Object -ExpandProperty 'PartOfDomain'
+          If ($GetDomainMembership -eq $False) {
+              Write-Output 'Adding computer to domain'
+              Try {
+                  Add-Computer -DomainName '{{getDirectoryInfo.fQDN}}' -Credential $Credentials -ErrorAction Stop
+                  Exit 3010 
+              } Catch [System.Exception] {
+                  Write-Output "Failed to get add computer domain $_"
+                  Exit 1
+              }
+          }
+    nextStep: deleteRolePolicy
+  - name: deleteRolePolicy
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRolePolicy
+      PolicyName: TempSecretAccess{{global:ACCOUNT_ID}}
+      RoleName: '{{InstanceRoleName}}'

@@ -1,0 +1,76 @@
+---
+description: Extends new AWS Managed Microsoft AD in a new region.
+schemaVersion: '0.3'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  DirectoryId:
+    default: d-92670d6791
+    description: The identifier of the directory to which you want to add Region replication.
+    type: String
+  RegionName:
+    default: us-east-1
+    description: The name of the Region where you want to add domain controllers for replication. For example, us-east-1.
+    type: String
+  Subnet1Id:
+    default: subnet-0f3d40ba8e84edeee
+    description: The identifiers of the subnets for the directory servers. The two subnets must be in different Availability Zones. AWS Directory Service creates a directory server and a DNS server in each of these subnets.
+    type: String
+  Subnet2Id:
+    default: subnet-003c5ca7637bc3984
+    description: The identifiers of the subnets for the directory servers. The two subnets must be in different Availability Zones. AWS Directory Service creates a directory server and a DNS server in each of these subnets.
+    type: String
+  VpcId:
+    default: vpc-0dfa383fc387eb63d
+    description: The identifier of the VPC in which to create the directory.
+    type: String
+mainSteps:
+  - name: addMADRegion
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ds
+      Api: AddRegion
+      DirectoryId: '{{ DirectoryId }}'
+      RegionName: '{{ RegionName }}'
+      VpcSettings:
+        VpcId: '{{ VpcId }}'
+        SubnetIds:
+          - '{{ Subnet1Id }}'
+          - '{{ Subnet2Id }}'
+    nextStep: Sleep
+  - name: Sleep
+    action: aws:sleep
+    inputs:
+      Duration: PT5M
+    nextStep: getMadSg
+  - name: getMadSg
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DescribeSecurityGroups
+      Filters:
+        - Name: group-name
+          Values:
+            - '{{ DirectoryId }}_controllers'
+    outputs:
+      - Name: madSgId
+        Selector: '$.SecurityGroups[0].GroupId'
+        Type: String
+    nextStep: modifyMadSgEgress
+  - name: modifyMadSgEgress
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupEgress
+      GroupId: '{{ getMadSg.madSgId }}'
+      IpPermissions:
+        - FromPort: -1
+          IpProtocol: '-1'
+          IpRanges:
+            - CidrIp: 0.0.0.0/0
+              Description: Allow All Outbound Traffic

@@ -1,0 +1,19 @@
+C:\ .\Invoke-SGTapeRecoveryFromBarcode.ps1 -Barcode (Get-Content -Path 'C:\Temp\Barcodes.txt') -GatewayName 'aws-tgw-useast2-02' -Region 'us-east-2' -ReportPath 'C:\Temp'
+INFO: Getting Storage Gateway ARN
+INFO: Enumerating all tapes in the region to parse them by thier barcode
+INFO: Adding tapes that match barcode(s) to array for retrieval
+INFO: Starting tape retrieval(s)
+INFO: Starting tape retrieval for arn:aws:storagegateway:us-east-2:168426257306:tape/TEST0040A2
+INFO: Starting tape retrieval for arn:aws:storagegateway:us-east-2:168426257306:tape/TEST4641E4
+
+Retrieved Tape ARN File
+-----------------------
+C:\Temp\RetrievalOutput2021-06-02-T12.txt
+
+C:\ .\Get-SGTapeRecoveryStatus.ps1 -TapeARN (Get-Content -Path 'C:\Temp\RetrievalOutput2021-06-02-T12.txt') -Region 'us-east-2'
+INFO: Getting tape status
+
+Tape ARN                                                      Tape Status
+--------                                                      -----------
+arn:aws:storagegateway:us-east-2:168426257306:tape/TEST0040A2 RETRIEVING
+arn:aws:storagegateway:us-east-2:168426257306:tape/TEST4641E4 RETRIEVING

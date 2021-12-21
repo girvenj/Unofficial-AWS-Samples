@@ -1,0 +1,172 @@
+---
+description: Configures SSM Stack
+schemaVersion: '0.3'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+mainSteps:
+  - name: EnaDriverUpdate
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: CreateAssociation
+      AssociationName: EnaDriverUpdate-DailyCheck
+      ComplianceSeverity: HIGH
+      MaxConcurrency: 50%
+      MaxErrors: 100%
+      Name: AWS-ConfigureAWSPackage
+      Parameters:
+        action: 
+          - Install
+        installationType: 
+          - Uninstall and reinstall
+        name: 
+          - AwsEnaNetworkDriver
+        version: 
+          - ''
+        additionalArguments:
+          - '{}'
+      ScheduleExpression: rate(24 Hours)
+      Targets:
+        - Key: tag-key
+          Values: 
+            - Patch Group
+    nextStep: LaunchAgentUpdate
+  - name: LaunchAgentUpdate
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: CreateAssociation
+      AssociationName: LaunchAgentUpdate-DailyCheck
+      ComplianceSeverity: HIGH
+      MaxConcurrency: 50%
+      MaxErrors: 100%
+      Name: AWS-ConfigureAWSPackage
+      Parameters:
+        action: 
+          - Install
+        installationType: 
+          - Uninstall and reinstall
+        name: 
+          - AWSEC2Launch-Agent
+        version: 
+          - ''
+        additionalArguments:
+          - '{}'
+      ScheduleExpression: rate(24 Hours)
+      Targets:
+        - Key: tag-key
+          Values: 
+            - Patch Group
+    nextStep: NvmeDriverUpdate
+  - name: NvmeDriverUpdate
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: CreateAssociation
+      AssociationName: NvmeDriverUpdate-DailyCheck
+      ComplianceSeverity: HIGH
+      MaxConcurrency: 50%
+      MaxErrors: 100%
+      Name: AWS-ConfigureAWSPackage
+      Parameters:
+        action: 
+          - Install
+        installationType: 
+          - Uninstall and reinstall
+        name: 
+          - AWSNVMe
+        version: 
+          - ''
+        additionalArguments:
+          - '{}'
+      ScheduleExpression: rate(24 Hours)
+      Targets:
+        - Key: tag-key
+          Values: 
+            - Patch Group
+    nextStep: PvDriverUpdate
+  - name: PvDriverUpdate
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: CreateAssociation
+      AssociationName: PvDriverUpdate-DailyCheck
+      ComplianceSeverity: HIGH
+      MaxConcurrency: 50%
+      MaxErrors: 100%
+      Name: AWS-ConfigureAWSPackage
+      Parameters:
+        action: 
+          - Install
+        installationType: 
+          - Uninstall and reinstall
+        name: 
+          - AWSPVDriver
+        version: 
+          - ''
+        additionalArguments:
+          - '{}'
+      ScheduleExpression: rate(24 Hours)
+      Targets:
+        - Key: tag-key
+          Values: 
+            - Patch Group
+    nextStep: SsmAgentUpdate
+  - name: SsmAgentUpdate
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: CreateAssociation
+      AssociationName: SsmAgentUpdate-DailyCheck
+      ComplianceSeverity: HIGH
+      MaxConcurrency: 50%
+      MaxErrors: 100%
+      Name: AWS-UpdateSSMAgent
+      ScheduleExpression: rate(24 Hours)
+      Targets:
+        - Key: tag-key
+          Values: 
+            - Patch Group
+    nextStep: SoftwareInventory
+  - name: SoftwareInventory
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: CreateAssociation
+      AssociationName: SoftwareInventory
+      ComplianceSeverity: CRITICAL
+      Name: AWS-GatherSoftwareInventory
+      Parameters:
+        applications: 
+          - Enabled
+        awsComponents: 
+          - Enabled
+        networkConfig: 
+          - Enabled
+        windowsUpdates:
+          - Enabled
+        instanceDetailedInformation: 
+          - Enabled
+        services: 
+          - Enabled
+        windowsRoles: 
+          - Enabled
+        customInventory:
+          - Enabled
+        billingInfo:
+          - Enabled
+      ScheduleExpression: rate(12 Hours)
+      Targets:
+        - Key: InstanceIds
+          Values: 
+            - '*'
+    nextStep: 

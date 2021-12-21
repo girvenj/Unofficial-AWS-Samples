@@ -1,0 +1,22 @@
+  - name: createAdminSecret
+    action: aws:executeAwsApi
+    inputs:
+      Service: secretsmanager
+      Api: GetRandomPassword
+      PasswordLength: 64
+    outputs:
+      - Name: adminPassword
+        Selector: '$.RandomPassword'
+        Type: 'String'
+  - name: createAdminSecret
+    action: aws:executeAwsApi
+    inputs:
+      Service: secretsmanager
+      Api: CreateSecret
+      Name: '{{ RootDCNetBIOSName }}Administrator'
+      Description: 'The password for the default Administrator account for {{ RootDomainDNSName }}'
+      SecretString: "{\"username\":\"Administrator\",\"password\":\"{{createAdminSecret.adminPassword}}\"}"
+    outputs:
+      - Name: adminSecret
+        Selector: '$.ARN'
+        Type: 'String'

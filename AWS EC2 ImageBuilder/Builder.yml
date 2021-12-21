@@ -1,0 +1,98 @@
+name: Baseline-Windows-2019thru20H2Baseline
+description: 'This document will install all available Windows updates and execute config scripts.'
+schemaVersion: 1.0
+phases:
+  - name: build
+    steps:
+      - name: CreateScriptFolders
+        action: ExecutePowerShell
+        timeoutSeconds: 30
+        onFailure: Abort
+        maxAttempts: 2
+        inputs:
+          commands:
+            - |
+              $Folders = @(
+                'ConfigFiles',
+                'Logs',
+                'Modules',
+                'Scripts',
+                'Temp'
+              )
+              Foreach  ($Folder in $Folders) {
+                $Path = Join-Path -Path 'C:\' -ChildPath $Folder
+                If (-not (Test-Path -Path $Path)) { New-Item -Path $Path -ItemType 'Directory' -ErrorAction Stop }
+              }
+              $Ec2 = Join-Path -Path 'C:\' -ChildPath 'ProgramData\Amazon\EC2-Windows'
+              If (Test-Path -Path $Ec2) { Remove-Item -Path $Ec2 -Recurse -Force }
+      - name: DownloadScriptsFromS3
+        action: S3Download
+        timeoutSeconds: 60
+        onFailure: Abort
+        maxAttempts: 2
+        inputs:
+          - source: 's3://example-image-builder/ConfigFiles/*'
+            destination: 'C:\ConfigFiles\'
+          - source: 's3://example-image-builder/Modules/*'
+            destination: 'C:\Modules\'
+          - source: 's3://example-image-builder/Scripts/*'
+            destination: 'C:\Scripts\'
+      - name: Run-Initialize-ImageScript
+        action: ExecutePowerShell
+        timeoutSeconds: 240
+        onFailure: Abort
+        maxAttempts: 2
+        inputs:
+          commands: 
+            - |
+              & C:\Scripts\Initialize-Image.ps1
+              Remove-Item -Path 'C:\Scripts\Initialize-Image.ps1' -Force
+      - name: RebootStep0
+        action: Reboot
+        onFailure: Abort
+        maxAttempts: 2
+        inputs:
+            delaySeconds: 30
+      - name: Run-Invoke-ConfigureTemplate
+        action: ExecutePowerShell
+        timeoutSeconds: 900
+        onFailure: Abort
+        maxAttempts: 2
+        inputs:
+          commands:
+            - |
+              Import-Module -Name Module-Baseline
+              Invoke-ConfigureTemplate -AdministratorPassword ('P@ssw0rd' | ConvertTo-SecureString -asPlainText -Force)
+      - name: Set-DSC
+        action: ExecutePowerShell
+        timeoutSeconds: 900
+        onFailure: Abort
+        maxAttempts: 4
+        inputs:
+          commands:
+            - |
+              Import-Module -Name Module-Baseline
+              & C:\Scripts\Set-DscConfiguration.ps1
+              Invoke-DscStatusCheck
+      - name: InstallWindowsUpdates
+        action: UpdateOS
+        onFailure: Abort
+        maxAttempts: 3
+      - name: Cleanup
+        action: ExecutePowerShell
+        timeoutSeconds: 120
+        onFailure: Abort
+        maxAttempts: 2
+        inputs:
+          commands:
+              - |
+                Remove-Item -Path 'C:\Temp\*' -Recurse -Force -ErrorAction Stop
+                Remove-Item -Path 'C:\Logs\*' -Recurse -Force -ErrorAction Stop
+                & wevtutil.exe enum-logs | Foreach-Object { & wevtutil.exe clear-log '$_' }
+                Remove-Item (Get-PSReadlineOption).HistorySavePath -ErrorAction SilentlyContinue
+      - name: RebootStep1
+        action: Reboot
+        onFailure: Abort
+        maxAttempts: 2
+        inputs:
+            delaySeconds: 30

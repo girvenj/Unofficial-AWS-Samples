@@ -1,0 +1,991 @@
+---
+description: Will deploy a fully functional VPC with subnets in 2 or 3 AZs. Also optional NAT subnets will be deployed.   
+schemaVersion: '0.3'
+parameters:
+  AWSCorpPrefixList:
+    default: pl-3ea44157
+    description: Amazon Corp Network Prefix lists
+    type: String
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  AvailiblitytZoneA:
+    default: us-east-2a
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  AvailiblitytZoneB:
+    default: us-east-2b
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  AvailiblitytZoneC:
+    default: us-east-2c
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  Deploy3rdAZ:
+    default: 'No'
+    description: Do you want to deploy a 3rd AZ?
+    type: String
+  DeployNatSubnets:
+    default: 'No'
+    description: Do you want to deploy NATed subnets?
+    type: String
+  NatSubnet1CidrBlock:
+    default: 10.0.0.96/27
+    description: CIDR for NATed subnet in AvailiblitytZoneA
+    type: String
+  NatSubnet2CidrBlock:
+    default: 10.0.0.128/27
+    description: CIDR for NATed subnet in AvailiblitytZoneB
+    type: String
+  NatSubnet3CidrBlock:
+    default: 10.0.0.160/27
+    description: CIDR for NATed subnet in AvailiblitytZoneC
+    type: String
+  NonRouteableSubnet1CidrBlock:
+    default: 10.0.0.192/28
+    description: CIDR for Non-Routable subnet in AvailiblitytZoneA
+    type: String
+  NonRouteableSubnet2CidrBlock:
+    default: 10.0.0.208/28
+    description: CIDR for Non-Routable subnet in AvailiblitytZoneB
+    type: String
+  NonRouteableSubnet3CidrBlock:
+    default: 10.0.0.224/28
+    description: CIDR for Non-Routable subnet in AvailiblitytZoneC
+    type: String
+  PublicSubnet1CidrBlock:
+    default: 10.0.0.0/27
+    description: CIDR for Public subnet in AvailiblitytZoneA
+    type: String
+  PublicSubnet2CidrBlock:
+    default: 10.0.0.32/27
+    description: CIDR for Public subnet in AvailiblitytZoneB
+    type: String
+  PublicSubnet3CidrBlock:
+    default: 10.0.0.64/27
+    description: CIDR for Public subnet in AvailiblitytZoneC
+    type: String
+  RDPCidrBlock:
+    default: 10.20.30.10/32
+    description: CIDR block that will be allowed in bound 3389 access.   
+    type: String
+  VpcCidrBlock:
+    default: 10.0.0.0/24
+    description: CIDR block for for VPC
+    type: String
+  VpcTag:
+    default: VPC01
+    description: 'Name Tag value for VPC'
+    type: String
+mainSteps:
+  - name: createVpc
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateVpc
+      CidrBlock: '{{ VpcCidrBlock }}'
+      TagSpecifications:
+        - ResourceType: vpc
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}'
+    outputs:
+      - Name: vpcId
+        Selector: $.Vpc.VpcId
+        Type: String
+    nextStep: configureVpcDnsHost
+  - name: configureVpcDnsHost
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsHostnames: 
+        Value: True
+      VpcId: '{{ createVpc.vpcId }}'
+    nextStep: configureVpcDns
+  - name: configureVpcDns
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsSupport:
+        Value: True
+      VpcId: '{{ createVpc.vpcId }}'
+    nextStep: createPubRtb
+  - name: createPubRtb
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-IGW-RT'
+    outputs:
+      - Name: pubRtbId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+    nextStep: createIgw
+  - name: createIgw
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateInternetGateway
+      TagSpecifications:
+        - ResourceType: internet-gateway
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-IGW'
+    outputs:
+      - Name: igwId
+        Selector: $.InternetGateway.InternetGatewayId
+        Type: String
+    nextStep: attachIgw
+  - name: attachIgw
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AttachInternetGateway
+      InternetGatewayId: '{{ createIgw.igwId }}'
+      VpcId: '{{ createVpc.vpcId }}'
+    nextStep: createPubRoute
+  - name: createPubRoute
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: '{{ createIgw.igwId }}'
+      RouteTableId: '{{ createPubRtb.pubRtbId }}'
+    nextStep: createNrRtb
+  - name: createNrRtb
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NR-RT'
+    outputs:
+      - Name: nrRtbId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+    nextStep: createPubSubnet1
+  - name: createPubSubnet1
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ PublicSubnet1CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneA }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-IGW-SUBNET-{{ PublicSubnet1CidrBlock }}'
+    outputs:
+      - Name: pubSubnet1Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setPubSubAssoc1
+  - name: setPubSubAssoc1
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createPubRtb.pubRtbId }}'
+      SubnetId: '{{ createPubSubnet1.pubSubnet1Id }}'
+    nextStep: createPubSubnet2
+  - name: createPubSubnet2
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ PublicSubnet2CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneB }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-IGW-SUBNET-{{ PublicSubnet2CidrBlock }}'
+    outputs:
+      - Name: pubSubnet2Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setPubSubAssoc2
+  - name: setPubSubAssoc2
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createPubRtb.pubRtbId }}'
+      SubnetId: '{{ createPubSubnet2.pubSubnet2Id }}'
+    nextStep: createNrSubnet1
+  - name: createNrSubnet1
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ NonRouteableSubnet1CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneA }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NR-SUBNET-{{ NonRouteableSubnet1CidrBlock }}'
+    outputs:
+      - Name: nrSubnet1Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setNrSubAssoc1
+  - name: setNrSubAssoc1
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createNrRtb.nrRtbId }}'
+      SubnetId: '{{ createNrSubnet1.nrSubnet1Id }}'
+    nextStep: createNrSubnet2
+  - name: createNrSubnet2
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ NonRouteableSubnet2CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneB }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NR-SUBNET-{{ NonRouteableSubnet2CidrBlock }}'
+    outputs:
+      - Name: nrSubnet2Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setNrSubAssoc2
+  - name: setNrSubAssoc2
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createNrRtb.nrRtbId }}'
+      SubnetId: '{{ createNrSubnet2.nrSubnet2Id }}'
+    nextStep: createthirdSubnets
+  - name: createthirdSubnets
+    action: aws:branch
+    inputs:
+      Choices:
+        - NextStep: createPubSubnet3
+          Variable: '{{ Deploy3rdAZ }}'
+          StringEquals: 'Yes'
+        - NextStep: createNatSubnets
+          Variable: '{{ Deploy3rdAZ }}'
+          StringEquals: 'No'
+  - name: createPubSubnet3
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ PublicSubnet3CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneC }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-IGW-SUBNET-{{ PublicSubnet3CidrBlock }}'
+    outputs:
+      - Name: pubSubnet3Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setPubSubAssoc3
+  - name: setPubSubAssoc3
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createPubRtb.pubRtbId }}'
+      SubnetId: '{{ createPubSubnet3.pubSubnet3Id }}'
+    nextStep: createNrSubnet3
+  - name: createNrSubnet3
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ NonRouteableSubnet3CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneC }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NR-SUBNET-{{ NonRouteableSubnet3CidrBlock }}'
+    outputs:
+      - Name: nrSubnet3Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setNrSubAssoc3
+  - name: setNrSubAssoc3
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createNrRtb.nrRtbId }}'
+      SubnetId: '{{ createNrSubnet3.nrSubnet3Id }}'
+    nextStep: createNatSubnets
+  - name: createNatSubnets
+    action: aws:branch
+    inputs:
+      Choices:
+        - NextStep: createNat1Rtb
+          Variable: '{{ DeployNatSubnets }}'
+          StringEquals: 'Yes'
+        - NextStep: createVpcAllSecGroup
+          Variable: '{{ DeployNatSubnets }}'
+          StringEquals: 'No'
+  - name: createNat1Rtb
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT01-RT'
+    outputs:
+      - Name: nat1RtbId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+    nextStep: createNat2Rtb
+  - name: createNat2Rtb
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT02-RT'
+    outputs:
+      - Name: nat2RtbId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+    nextStep: createNatSubnet1
+  - name: createNatSubnet1
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ NatSubnet1CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneA }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT-SUBNET-{{ NatSubnet1CidrBlock }}'
+    outputs:
+      - Name: natSubnet1Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setNatSubAssoc1
+  - name: setNatSubAssoc1
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createNat1Rtb.nat1RtbId }}'
+      SubnetId: '{{ createNatSubnet1.natSubnet1Id }}'
+    nextStep: createNatSubnet2
+  - name: createNatSubnet2
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ NatSubnet2CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneB }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT-SUBNET-{{ NatSubnet2CidrBlock }}'
+    outputs:
+      - Name: natSubnet2Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setNatSubAssoc2
+  - name: setNatSubAssoc2
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createNat2Rtb.nat2RtbId }}'
+      SubnetId: '{{ createNatSubnet2.natSubnet2Id }}'
+    nextStep: allocateEip1
+  - name: allocateEip1
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AllocateAddress
+      Domain: vpc
+      TagSpecifications:
+        - ResourceType: elastic-ip
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT01-EIP'
+    outputs:
+      - Name: eip1AllocationId
+        Selector: $.AllocationId
+        Type: String
+    nextStep: createNatGw1
+  - name: createNatGw1
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateNatGateway
+      AllocationId: '{{ allocateEip1.eip1AllocationId }}'
+      SubnetId: '{{ createPubSubnet1.pubSubnet1Id }}'
+      TagSpecifications:
+        - ResourceType: natgateway
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT01'
+    outputs:
+      - Name: natGwId1
+        Selector: $.NatGateway.NatGatewayId
+        Type: String
+    nextStep: verifyNatGw1Available
+  - name: verifyNatGw1Available
+    action: aws:waitForAwsResourceProperty
+    timeoutSeconds: 150
+    inputs:
+      Service: ec2
+      Api: DescribeNatGateways
+      NatGatewayIds:
+        - '{{ createNatGw1.natGwId1 }}'
+      PropertySelector: '$.NatGateways[0].State'
+      DesiredValues:
+        - available
+    nextStep: getNatGw1EniId
+  - name: getNatGw1EniId
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DescribeNetworkInterfaces
+      Filters:
+        - Name: vpc-id
+          Values:
+            - '{{ createVpc.vpcId }}'
+        - Name: description 
+          Values:
+            - 'Interface for NAT Gateway {{ createNatGw1.natGwId1 }}'
+    outputs:
+      - Name: natGw1EniId
+        Selector: '$.NetworkInterfaces[0].NetworkInterfaceId'
+        Type: String
+    nextStep: setNatGw1EniTag
+  - name: setNatGw1EniTag
+    action: aws:createTags
+    onFailure: Abort
+    inputs:
+      ResourceType: EC2
+      ResourceIds: 
+        - '{{ getNatGw1EniId.natGw1EniId }}'
+      Tags:
+      - Key: Name
+        Value: '{{ VpcTag }}-NAT01'
+    nextStep: createNat1Route
+  - name: createNat1Route
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: '{{ createNatGw1.natGwId1 }}'
+      RouteTableId: '{{ createNat1Rtb.nat1RtbId }}'
+    nextStep: allocateEip2
+  - name: allocateEip2
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AllocateAddress
+      Domain: vpc
+      TagSpecifications:
+        - ResourceType: elastic-ip
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT02-EIP'
+    outputs:
+      - Name: eip2AllocationId
+        Selector: $.AllocationId
+        Type: String
+    nextStep: createNatGw2
+  - name: createNatGw2
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateNatGateway
+      AllocationId: '{{ allocateEip2.eip2AllocationId }}'
+      SubnetId: '{{ createPubSubnet2.pubSubnet2Id }}'
+      TagSpecifications:
+        - ResourceType: natgateway
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT02'
+    outputs:
+      - Name: natGwId2
+        Selector: $.NatGateway.NatGatewayId
+        Type: String
+    nextStep: verifyNatGw2Available
+  - name: verifyNatGw2Available
+    action: aws:waitForAwsResourceProperty
+    timeoutSeconds: 150
+    inputs:
+      Service: ec2
+      Api: DescribeNatGateways
+      NatGatewayIds:
+        - '{{ createNatGw2.natGwId2 }}'
+      PropertySelector: '$.NatGateways[0].State'
+      DesiredValues:
+        - available
+    nextStep: getNatGw2EniId
+  - name: getNatGw2EniId
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DescribeNetworkInterfaces
+      Filters:
+        - Name: vpc-id
+          Values:
+            - '{{ createVpc.vpcId }}'
+        - Name: description 
+          Values:
+            - 'Interface for NAT Gateway {{ createNatGw2.natGwId2 }}'
+    outputs:
+      - Name: natGw2EniId
+        Selector: '$.NetworkInterfaces[0].NetworkInterfaceId'
+        Type: String
+    nextStep: setNatGw2EniTag
+  - name: setNatGw2EniTag
+    action: aws:createTags
+    onFailure: Abort
+    inputs:
+      ResourceType: EC2
+      ResourceIds: 
+        - '{{ getNatGw2EniId.natGw2EniId }}'
+      Tags:
+      - Key: Name
+        Value: '{{ VpcTag }}-NAT02'
+    nextStep: createNat2Route
+  - name: createNat2Route
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: '{{ createNatGw2.natGwId2 }}'
+      RouteTableId: '{{ createNat2Rtb.nat2RtbId }}'
+    nextStep: createthirdNatSubnet
+  - name: createthirdNatSubnet
+    action: aws:branch
+    inputs:
+      Choices:
+        - NextStep: createNat3Rtb
+          Variable: '{{ Deploy3rdAZ }}'
+          StringEquals: 'Yes'
+        - NextStep: createVpcAllSecGroup
+          Variable: '{{ Deploy3rdAZ }}'
+          StringEquals: 'No'
+  - name: createNat3Rtb
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT03-RT'
+    outputs:
+      - Name: nat3RtbId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+    nextStep: createNatSubnet3
+  - name: createNatSubnet3
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: '{{ NatSubnet3CidrBlock }}'
+      AvailabilityZone: '{{ AvailiblitytZoneC }}'
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT-SUBNET-{{ NatSubnet3CidrBlock }}'
+    outputs:
+      - Name: natSubnet3Id
+        Selector: $.Subnet.SubnetId
+        Type: String
+    nextStep: setNatSubAssoc3
+  - name: setNatSubAssoc3
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{ createNat3Rtb.nat3RtbId }}'
+      SubnetId: '{{ createNatSubnet3.natSubnet3Id }}'
+    nextStep: allocateEip3
+  - name: allocateEip3
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AllocateAddress
+      Domain: vpc
+      TagSpecifications:
+        - ResourceType: elastic-ip
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT03-EIP'
+    outputs:
+      - Name: eip3AllocationId
+        Selector: $.AllocationId
+        Type: String
+    nextStep: createNatGw3
+  - name: createNatGw3
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateNatGateway
+      AllocationId: '{{ allocateEip3.eip3AllocationId }}'
+      SubnetId: '{{ createPubSubnet3.pubSubnet3Id }}'
+      TagSpecifications:
+        - ResourceType: natgateway
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-NAT03'
+    outputs:
+      - Name: natGwId3
+        Selector: $.NatGateway.NatGatewayId
+        Type: String
+    nextStep: verifyNatGw3Available
+  - name: verifyNatGw3Available
+    action: aws:waitForAwsResourceProperty
+    timeoutSeconds: 150
+    inputs:
+      Service: ec2
+      Api: DescribeNatGateways
+      NatGatewayIds:
+        - '{{ createNatGw3.natGwId3 }}'
+      PropertySelector: '$.NatGateways[0].State'
+      DesiredValues:
+        - available
+    nextStep: createNat3Route
+  - name: createNat3Route
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: '{{ createNatGw3.natGwId3 }}'
+      RouteTableId: '{{ createNat3Rtb.nat3RtbId }}'
+    nextStep: createVpcAllSecGroup
+  - name: createVpcAllSecGroup
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: '{{ VpcTag }}-SG-All-In-VPC'
+      Description: Allow All Inbound Traffic From Local and Peer/Connected VPCs
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: security-group
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-SG-All-In-VPC'
+    outputs:
+      - Name: vpcAllSecGroupId
+        Selector: $.GroupId
+        Type: String
+    nextStep: createPrefixList
+  - name: createPrefixList
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateManagedPrefixList
+      AddressFamily: IPv4
+      Entries:
+        - Cidr: '{{ VpcCidrBlock }}'
+          Description: '{{ VpcTag }} CIDR Range'
+      MaxEntries: 30
+      PrefixListName: '{{ VpcTag }}-Local&Trusted-PL'
+      TagSpecifications:
+        - ResourceType: prefix-list
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-Local&Trusted-PL'
+    outputs:
+      - Name: prefixListId
+        Selector: $.PrefixList.PrefixListId
+        Type: String
+    nextStep: authIngressVpcAllTraffic
+  - name: authIngressVpcAllTraffic
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{ createVpcAllSecGroup.vpcAllSecGroupId }}'
+      IpPermissions:
+        - FromPort: -1
+          IpProtocol: '-1'
+          PrefixListIds:
+            - PrefixListId: '{{ createPrefixList.prefixListId }}'
+              Description: Allow All Inbound Traffic From Local VPC
+    nextStep: createHttpSecGroup
+  - name: createHttpSecGroup
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: '{{ VpcTag }}-SG-HTTP/S-In-Everywhere'
+      Description: Allow HTTP/S Inbound Traffic From Everywhere
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: security-group
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-SG-HTTP/S-In-Everywhere'
+    outputs:
+      - Name: httpSecGroupId
+        Selector: $.GroupId
+        Type: String
+    nextStep: authIngressHttpTraffic
+  - name: authIngressHttpTraffic
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{ createHttpSecGroup.httpSecGroupId }}'
+      IpPermissions:
+        - FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: 0.0.0.0/0
+              Description: Allow HTTP/S Inbound Traffic From Everywhere
+    nextStep: createRdpHomeSecGroup
+  - name: createRdpHomeSecGroup
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: '{{ VpcTag }}-SG-RDP/SSH-In-Home'
+      Description: Allow RDP/SSH Inbound Traffic From Home
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: security-group
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-SG-RDP/SSH-In-Home'
+    outputs:
+      - Name: homeSecGroupId
+        Selector: $.GroupId
+        Type: String
+    nextStep: authIngressRdpHomeTraffic
+  - name: authIngressRdpHomeTraffic
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{ createRdpHomeSecGroup.homeSecGroupId }}'
+      IpPermissions:
+        - FromPort: 3389
+          ToPort: 3389
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{ RDPCidrBlock }}'
+              Description: Allow RDP Inbound Traffic From Home
+        - FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{ RDPCidrBlock }}'
+              Description: Allow SSH Inbound Traffic From Home
+    nextStep: createRdpWorkSecGroup
+  - name: createRdpWorkSecGroup
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: '{{ VpcTag }}-SG-RDP/SSH-In-Work'
+      Description: Allow RDP/SSH Inbound Traffic From Work
+      VpcId: '{{ createVpc.vpcId }}'
+      TagSpecifications:
+        - ResourceType: security-group
+          Tags:
+            - Key: Name
+              Value: '{{ VpcTag }}-SG-RDP/SSH-In-Work'
+    outputs:
+      - Name: workSecGroupId
+        Selector: $.GroupId
+        Type: String
+    nextStep: authIngressRdpWorkTraffic
+  - name: authIngressRdpWorkTraffic
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{ createRdpWorkSecGroup.workSecGroupId }}'
+      IpPermissions:
+        - FromPort: 3389
+          ToPort: 3389
+          IpProtocol: tcp
+          PrefixListIds:
+            - PrefixListId: '{{ AWSCorpPrefixList }}'
+              Description: Allow RDP Inbound Traffic From Work
+        - FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+          PrefixListIds:
+            - PrefixListId: '{{ AWSCorpPrefixList }}'
+              Description: Allow RDP Inbound Traffic From Work
+    nextStep: getDefaultRtb
+  - name: getDefaultRtb
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DescribeRouteTables
+      Filters:
+        - Name: vpc-id
+          Values:
+            - '{{ createVpc.vpcId }}'
+        - Name: association.main
+          Values:
+            - 'true'
+    outputs:
+      - Name: defaultRtbId
+        Selector: '$.RouteTables[0].RouteTableId'
+        Type: String
+    nextStep: getDefaultSg
+  - name: getDefaultSg
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DescribeSecurityGroups
+      Filters:
+        - Name: vpc-id
+          Values:
+            - '{{ createVpc.vpcId }}'
+        - Name: group-name
+          Values:
+            - 'default'
+    outputs:
+      - Name: defaultSgId
+        Selector: '$.SecurityGroups[0].GroupId'
+        Type: String
+    nextStep: setDefaultTag
+  - name: setDefaultTag
+    action: aws:createTags
+    onFailure: Abort
+    inputs:
+      ResourceType: EC2
+      ResourceIds: 
+        - '{{ getDefaultRtb.defaultRtbId }}'
+        - '{{ getDefaultSg.defaultSgId }}'
+      Tags:
+      - Key: Name
+        Value: 'Do-Not-Use'
+    nextStep: getDefaultNacl
+  - name: getDefaultNacl
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DescribeNetworkAcls
+      Filters:
+        - Name: vpc-id
+          Values:
+            - '{{ createVpc.vpcId }}'
+    outputs:
+      - Name: mainNaclId
+        Selector: '$.NetworkAcls[0].NetworkAclId'
+        Type: String
+    nextStep: setMainNaclTag
+  - name: setMainNaclTag
+    action: aws:createTags
+    onFailure: Abort
+    inputs:
+      ResourceType: EC2
+      ResourceIds: 
+        - '{{ getDefaultNacl.mainNaclId }}'
+      Tags:
+      - Key: Name
+        Value: '{{ VpcTag }}-NACL'
