@@ -3,7 +3,7 @@ description: Creates a root Microsoft AD Domain with 1 domain controller.
 schemaVersion: '0.3'
 parameters:
   AmiNameTag:
-    default: Windows-Server-2019-Full-Template
+    default: Windows-Server-2022-Full-Template
     description: Image Name to launch EC2 instance with.
     type: String
   AutomationAssumeRole:
@@ -19,11 +19,11 @@ parameters:
     description: The length of time before deleted objects are moved from the AD Recycle Bin to Tombstome
     type: String
   InstanceRoleName:
-    default: SSMCore
+    default: SSMCore+CWL
     description: Instance Role Name to launch EC2 instance with
     type: String
   KeyName:
-    default: Girven-Base
+    default: Baseline
     description: PEM Keypair
     type: String
   KmsKeyId:
@@ -31,7 +31,7 @@ parameters:
     description: KMS Key for EBS Encryption 
     type: String
   RestoreModeSecretArn:
-    default: arn:aws:secretsmanager:us-west-2:820097935833:secret:DefaultCreds-IsuSDO
+    default: arn:aws:secretsmanager:us-west-2:156285977455:secret:DefaultCreds-MItAmX
     description: ARN for the Restore Mode credentials Secret used to promote domain controllers
     type: String
   RootDCInstanceType:
@@ -55,17 +55,17 @@ parameters:
     description: NetBIOS name of the domain (up to 15 characters) you would like to join and promote to for users of earlier versions of Windows e.g. EXAMPLE
     type: String
   RootSecretArn:
-    default: arn:aws:secretsmanager:us-west-2:820097935833:secret:DefaultCreds-IsuSDO
+    default: arn:aws:secretsmanager:us-west-2:156285977455:secret:DefaultCreds-MItAmX
     description: ARN for the Administrator credentials Secret used to join and promote domain controllers
     type: String
   SecurityGroupId:
     default:
-      - sg-0482d7dc863da9114
-      - sg-092eae60d142c5076
+      - sg-00925bfa64112a869
+      - sg-08654c41fd3c9b0bf
     description: Security Group the Root Active Directory Domain Controller will use
     type: StringList
   SubnetId:
-    default: subnet-0f3d40ba8e84edeee
+    default: subnet-0ddc03361b9ad7b07
     description: Subnet ID where the Root Active Directory Domain Controller will be deployed to
     type: String
   Tombstonelifetime:

@@ -72,7 +72,7 @@ Configuration AwsDriversInstall {
         AwsDriverPvInstaller PV {
             Ensure        = 'Present'  
             DeviceName    = 'AWS PV Drivers'
-            DriverVersion = '8.4.0'
+            DriverVersion = '8.4.1'
             URL           = 'https://s3.amazonaws.com/ec2-windows-drivers-downloads/AWSPV/Latest/AWSPVDriver.zip'
         }
     }

@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+    AdminPassword:
+        AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
+        Default: P@ssw0rd
+        Description: Password for the Admin and Administrator accounts (Also used to create the trust)
+        MaxLength: "127"
+        MinLength: "7"
+        NoEcho: "true"
+        Type: String
+    MADDomainName:
+        AllowedPattern: ^([a-zA-Z0-9]+[\\.-])+([a-zA-Z0-9])+$
+        Default: corp.example.com
+        Description: Fully qualified domain name (FQDN) of the AWS Managed Microsoft AD domain e.g. corp.example.com
+        MaxLength: "255"
+        MinLength: "2"
+        Type: String
+    MADNetBIOSName:
+        AllowedPattern: ^[^\\/:*?"<>|.]+[^\\/:*?"<>|]*$
+        Default: CORP
+        Description: NetBIOS name of the AWS Managed Microsoft AD domain (up to 15 characters) e.g. CORP
+        MaxLength: "15"
+        MinLength: "1"
+        Type: String
+    MADExtendedRegion:
+        Default: us-east-2
+        Description: Region AWS Managed Microsoft AD domain will be extended to
+        Type: String
+    MADExtendedVpcId:
+        Default: vpc-0d50b8f6a5c83e483
+        Description: Vpc Id in region AWS Managed Microsoft AD domain will be extended to
+        Type: String  
+    MADExtendedRegionSubnet1:
+        Default: subnet-0c0038404c51845e8
+        Description: Subnet Id in region AWS Managed Microsoft AD domain will be extended to
+        Type: String         
+    MADExtendedRegionSubnet2:
+        Default: subnet-05588db161125166b
+        Description: Subnet Id in region AWS Managed Microsoft AD domain will be extended to
+        Type: String                           
+Metadata:
+    AWS::CloudFormation::Interface:
+        ParameterGroups:
+            - Label:
+                  default: Configuration
+              Parameters:
+                  - AdminPassword
+                  - MADDomainName
+                  - MADNetBIOSName
+        ParameterLabels:
+            AdminPassword:
+                default: Admin & Trusts Password
+            MADDomainName:
+                default: AWS Managed Microsft AD Domain DNS Name
+            MADNetBIOSName:
+                default: AWS Managed Microsft AD Domain NetBIOS Name
+Resources:
+    VPC:
+        Type: AWS::EC2::VPC
+        Properties:
+            CidrBlock: 10.0.0.0/24
+            EnableDnsHostnames: true
+            EnableDnsSupport: true
+            InstanceTenancy: default
+            Tags:
+                - Key: Name
+                  Value: Demo-VPC
+    VPCPublicSubnet1Subnet:
+        Type: AWS::EC2::Subnet
+        Properties:
+            AvailabilityZone: !Select
+                - 0
+                - Fn::GetAZs: !Ref AWS::Region
+            CidrBlock: !Select
+                - 0
+                - !Cidr
+                  - !GetAtt VPC.CidrBlock
+                  - 2
+                  - 6
+            MapPublicIpOnLaunch: true
+            Tags:
+                - Key: Name
+                  Value: Demo-Subnet1
+            VpcId: !Ref VPC
+    VPCPublicSubnet1RouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            Tags:
+                - Key: Name
+                  Value: Demo-Subnet1
+            VpcId: !Ref VPC
+    VPCPublicSubnet1RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId:
+                Ref: VPCPublicSubnet1RouteTable
+            SubnetId:
+                Ref: VPCPublicSubnet1Subnet
+    VPCPublicSubnet1DefaultRoute:
+        Type: AWS::EC2::Route
+        DependsOn: VPCVPCGW
+        Properties:
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId:
+                Ref: VPCIGW
+            RouteTableId:
+                Ref: VPCPublicSubnet1RouteTable
+    VPCPublicSubnet2Subnet:
+        Type: AWS::EC2::Subnet
+        Properties:
+            AvailabilityZone: !Select
+                - 1
+                - Fn::GetAZs: !Ref AWS::Region
+            CidrBlock: !Select
+                - 1
+                - !Cidr
+                  - !GetAtt VPC.CidrBlock
+                  - 2
+                  - 6
+            MapPublicIpOnLaunch: true
+            Tags:
+                - Key: Name
+                  Value: Demo-Subnet2
+            VpcId: !Ref VPC
+    VPCPublicSubnet2RouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            Tags:
+                - Key: Name
+                  Value: Demo-Subnet2
+            VpcId: !Ref VPC
+    VPCPublicSubnet2RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId:
+                Ref: VPCPublicSubnet2RouteTable
+            SubnetId:
+                Ref: VPCPublicSubnet2Subnet
+    VPCPublicSubnet2DefaultRoute:
+        DependsOn: VPCVPCGW
+        Type: AWS::EC2::Route
+        Properties:
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId:
+                Ref: VPCIGW
+            RouteTableId:
+                Ref: VPCPublicSubnet2RouteTable
+    VPCIGW:
+        Type: AWS::EC2::InternetGateway
+        Properties:
+            Tags:
+                - Key: Name
+                  Value: Demo-IGW
+    VPCVPCGW:
+        Type: AWS::EC2::VPCGatewayAttachment
+        Properties:
+            InternetGatewayId:
+                Ref: VPCIGW
+            VpcId: !Ref VPC
+    ManagedAD:
+        Type: AWS::DirectoryService::MicrosoftAD
+        Properties:
+            CreateAlias: false
+            Edition: Enterprise
+            EnableSso: false
+            Name: !Ref MADDomainName
+            Password: !Ref AdminPassword
+            ShortName: !Ref MADNetBIOSName
+            VpcSettings:
+                SubnetIds:
+                    - !Ref VPCPublicSubnet1Subnet
+                    - !Ref VPCPublicSubnet2Subnet
+                VpcId: !Ref VPC
+    LambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Principal:
+                  Service: 
+                    - lambda.amazonaws.com
+                Action: sts:AssumeRole
+        ManagedPolicyArns:
+            - !Sub arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess  
+    AddRegionFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        Code:
+          ZipFile: |
+            import json
+            import logging
+            import threading
+            import boto3
+            import cfnresponse
+            def extend_region(directoryId, newRegion, vcpId, subnetId1, subnetId2):
+                ds = boto3.client('ds')
+                ds.add_region (
+                    DirectoryId=directoryId,
+                    RegionName=newRegion,
+                    VPCSettings={
+                        'VpcId': vcpId,
+                        'SubnetIds': [
+                            subnetId1,
+                            subnetId2
+                        ]
+                    }
+                )
+            def timeout(event, context):
+                logging.error('Execution is about to time out, sending failure response to CloudFormation')
+                cfnresponse.send(event, context, cfnresponse.FAILED, {}, None)
+            def handler(event, context):
+                timer = threading.Timer((context.get_remaining_time_in_millis() / 1000.00) - 0.5, timeout, args=[event, context])
+                timer.start()
+                print('Received event: %s' % json.dumps(event))
+                status = cfnresponse.SUCCESS
+                try:
+                    directoryId = event['ResourceProperties']['DirectoryId']
+                    newRegion = event['ResourceProperties']['RegionName']
+                    vcpId = event['ResourceProperties']['VpcId']
+                    subnetId1 = event['ResourceProperties']['SubnetId1']
+                    subnetId2 = event['ResourceProperties']['SubnetId2']
+                    extend_region(directoryId, newRegion, vcpId, subnetId1, subnetId2)
+                except Exception as e:
+                    logging.error('Exception: %s' % e, exc_info=True)
+                    status = cfnresponse.FAILED
+                finally:
+                    timer.cancel()
+                    cfnresponse.send(event, context, status, {})
+        Handler: index.handler
+        Role: !GetAtt LambdaRole.Arn
+        Runtime: python3.9
+        Timeout: 240
+    AddRegionInvocation:
+      Type: Custom::AddRegion
+      DependsOn: ManagedAD
+      Properties:
+        ServiceToken: !GetAtt AddRegionFunction.Arn
+        DirectoryId: !Ref ManagedAD
+        RegionName: !Ref MADExtendedRegion
+        VpcId: !Ref MADExtendedVpcId
+        SubnetId1: !Ref MADExtendedRegionSubnet1
+        SubnetId2: !Ref MADExtendedRegionSubnet2
+    

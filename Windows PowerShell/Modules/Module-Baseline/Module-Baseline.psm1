@@ -298,6 +298,7 @@ Function Get-PsModules {
         'AWS.Tools.EBS',
         'AWS.Tools.S3',
         'AWS.Tools.SecretsManager',
+        'AWS.Tools.SimpleSystemsManagement',
         'AWS.Tools.Common',
         'NetworkingDsc', 
         'ComputerManagementDsc',

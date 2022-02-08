@@ -215,7 +215,16 @@ Function Set-PostDcPromo {
         Exit 1
     }
 
-    If ($ComputerName -eq $Pdce) { 
+    If ($ComputerName -eq $Pdce) {
+    
+        Write-ToLog -InvocationName $ServiceName -LogData 'Setting PasswordNotRequired flag on Guest to false' -Severity 'INFO'
+        Try {
+            Set-ADUser 'Guest' -PasswordNotRequired $False -ErrorAction Stop
+        } Catch [System.Exception] {
+            Write-ToLog -InvocationName $ServiceName -LogData "Failed to set the PasswordNotRequired flag on Guest to false $_" -Severity 'ERROR'
+            #Exit 1
+        }
+
         $OUs = @(
             'Domain Elevated Accounts',
             'Domain Users',
@@ -312,12 +321,12 @@ Function Set-PostDcPromo {
         
         $GuestPwStatus = Get-ADUser -Identity 'Guest' -Properties 'Passwordnotrequired', 'PasswordNeverExpires' -ErrorAction SilentlyContinue
         If ($GuestPwStatus.Passwordnotrequired -eq $True -or $GuestPwStatus.PasswordNeverExpires -eq $True ) {
-            Write-ToLog -InvocationName $ServiceName -LogData 'Setting Passwordnotrequired flag to false on Guest' -Severity 'INFO'
+            Write-ToLog -InvocationName $ServiceName -LogData 'Setting -PasswordNeverExpires flag con Guest' -Severity 'INFO'
             Try {
-                Set-ADUser 'Guest' -PasswordNotRequired $False -PasswordNeverExpires $False -ErrorAction Stop
+                Set-ADUser 'Guest' -PasswordNeverExpires $False -ErrorAction Stop
             } Catch [System.Exception] {
-                Write-ToLog -InvocationName $ServiceName -LogData "Failed to set Passwordnotrequired flag to false on Guest $_" -Severity 'ERROR'
-                Exit 1
+                Write-ToLog -InvocationName $ServiceName -LogData "Failed to set -PasswordNeverExpires flag to false on Guest $_" -Severity 'ERROR'
+                #Exit 1
             }
         }
 
@@ -817,7 +826,7 @@ Function Set-PostDcPromoPdce {
 Function Set-PostMadPromo {
     [CmdletBinding()]
     Param (
-        [Parameter(Mandatory = $false)][System.Management.Automation.PSCredential]$Credentials,
+        [Parameter(Mandatory = $true)][System.Management.Automation.PSCredential]$Credentials,
         [Parameter(Mandatory = $true)][String]$DeletedObjectLifetime
     )
     
