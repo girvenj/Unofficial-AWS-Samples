@@ -5490,32 +5490,6 @@ Resources:
                 AutomaticBackupRetentionDays: 0
                 DeploymentType: SINGLE_AZ_2
                 ThroughputCapacity: 16
-    FSxOnprem:
-        Type: AWS::FSx::FileSystem
-        DependsOn: ManagedAD
-        Properties: 
-            FileSystemType: WINDOWS
-            SecurityGroupIds: 
-                - !Ref DomainMemberSG
-            StorageCapacity: 32
-            StorageType: SSD
-            SubnetIds: 
-                - !Ref VPCPublicSubnet1Subnet
-            WindowsConfiguration: 
-                ActiveDirectoryId: !Ref ManagedAD
-                Aliases: 
-                    - !Join [ '.', [ DemoFSx, !Ref OnpremDomainName] ]
-                AutomaticBackupRetentionDays: 0
-                DeploymentType: SINGLE_AZ_2
-                SelfManagedActiveDirectoryConfiguration:
-                  DnsIps: 
-                    - !GetAtt OnPremDomainController.PrivateIp
-                  DomainName: !Ref OnpremDomainName
-                  FileSystemAdministratorsGroup: FSxAdmins
-                  OrganizationalUnitDistinguishedName: 'OU=FSx,DC=onpremises,DC=local'
-                  Password: !Ref AdminPassword
-                  UserName: FSxServiceAccount
-                ThroughputCapacity: 16
 Outputs:
     MADManagementInstanceID:
         Description: MAD Management Instance ID
