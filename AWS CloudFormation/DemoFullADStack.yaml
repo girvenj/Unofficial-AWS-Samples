@@ -5526,10 +5526,10 @@ Outputs:
         Value: !Ref DomainMemberSG
     FSxFileSystemId:
         Description: FileSystem ID of FSx
-        Value: !Ref FSx
+        Value: !Ref FSxMAD
     FSxFileSystemDNSName:
         Description: FSx DNS Name
-        Value: !GetAtt FSx.DNSName
+        Value: !GetAtt FSxMAD.DNSName
     RDSInstanceName:
         Description: Instance Name of RDS Instance
         Value: !Ref RdsDB
