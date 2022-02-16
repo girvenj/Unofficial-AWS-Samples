@@ -242,4 +242,3 @@ Resources:
         VpcId: !Ref MADExtendedVpcId
         SubnetId1: !Ref MADExtendedRegionSubnet1
         SubnetId2: !Ref MADExtendedRegionSubnet2
-    

@@ -1,0 +1,554 @@
+{
+    "Sources": [
+        {
+            "Categories": [
+                {
+                    "Category": "ENA Packets Shaping",
+                    "Instances": "ENA #1",
+                    "Counters": [
+                        {
+                            "Unit": "Count",
+                            "Counter": "Aggregate inbound BW allowance exceeded"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "Aggregate outbound BW allowance exceeded"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "Connection tracking allowance exceeded"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "Link local packet rate allowance exceeded"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "PPS allowance exceeded"
+                        }
+                    ]
+                },
+                {
+                    "Category": "LogicalDisk",
+                    "Instances": "D:",
+                    "Counters": [
+                        {
+                            "Unit": "Percent",
+                            "Counter": "% Free Space"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "Avg. Disk Queue Length"
+                        }
+                    ]
+                },
+                {
+                    "Category": "LogicalDisk",
+                    "Instances": "C:",
+                    "Counters": [
+                        {
+                            "Unit": "Percent",
+                            "Counter": "% Free Space"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "Avg. Disk Queue Length"
+                        }
+                    ]
+                },
+                {
+                    "Counters": [
+                        {
+                            "Unit": "Percent",
+                            "Counter": "% Committed Bytes in Use"
+                        },
+                        {
+                            "Unit": "Megabytes",
+                            "Counter": "Available MBytes"
+                        },
+                        {
+                            "Unit": "Seconds",
+                            "Counter": "Long-Term Average Standby Cache Lifetime (s)"
+                        }
+                    ],
+                    "Category": "Memory"
+                },
+                {
+                    "Category": "Network Interface",
+                    "Instances": "Amazon Elastic Network Adapter",
+                    "Counters": [
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "Bytes Received/sec"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "Bytes Sent/sec"
+                        },
+                        {
+                            "Unit": "Bits/Second",
+                            "Counter": "Current Bandwidth"
+                        }
+                    ]
+                },
+                {
+                    "Category": "PhysicalDisk",
+                    "Instances": "0 C:",
+                    "Counters": [
+                        {
+                            "Unit": "Count",
+                            "Counter": "Avg. Disk Queue Length"
+                        }
+                    ]
+                },
+                {
+                    "Category": "PhysicalDisk",
+                    "Instances": "1 D:",
+                    "Counters": [
+                        {
+                            "Unit": "Count",
+                            "Counter": "Avg. Disk Queue Length"
+                        }
+                    ]
+                },
+                {
+                    "Category": "Processor",
+                    "Instances": "*",
+                    "Counters": [
+                        {
+                            "Unit": "Percent",
+                            "Counter": "% Processor Time"
+                        }
+                    ]
+                },
+                {
+                    "Counters": [
+                        {
+                            "Unit": "Count",
+                            "Counter": "Active Web Service Sessions"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "ChangePassword Operations Per Second"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "Delete Operations Per Second"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "SetPassword Operations Per Second"
+                        }
+                    ],
+                    "Category": "ADWS"
+                },
+                {
+                    "Category": "Database ==> Instances",
+                    "Instances": "NTDSA",
+                    "Counters": [
+                        {
+                            "Unit": "Percent",
+                            "Counter": "Database Cache % Hit"
+                        },
+                        {
+                            "Unit": "Megabytes",
+                            "Counter": "Database Cache Size (MB)"
+                        },
+                        {
+                            "Unit": "Milliseconds",
+                            "Counter": "I/O Database Reads Average Latency"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "I/O Database Reads/sec"
+                        },
+                        {
+                            "Unit": "Milliseconds",
+                            "Counter": "I/O Log Writes Average Latency"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "I/O Database Writes/sec"
+                        }
+                    ]
+                },
+                {
+                    "Category": "DFS Replication Service Volumes",
+                    "Instances": "*",
+                    "Counters": [
+                        {
+                            "Unit": "Percent",
+                            "Counter": "USN Journal Unread Percentage"
+                        }
+                    ]
+                },
+                {
+                    "Counters": [
+                        {
+                            "Unit": "Count",
+                            "Counter": "Dynamic Update Rejected"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "Recursive Queries/sec"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "Recursive Query Failure/sec"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "Secure Update Failure"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "TCP Query Received/sec"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "Total Query Received/sec"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "Total Response Sent/sec"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "UDP Query Received/sec"
+                        }
+                    ],
+                    "Category": "DNS"
+                },
+                {
+                    "Counters": [
+                        {
+                            "Unit": "Milliseconds",
+                            "Counter": "ATQ Estimated Queue Delay"
+                        },
+                        {
+                            "Unit": "Milliseconds",
+                            "Counter": "ATQ Request Latency"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "DRA Pending Replication Operations"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "DRA Pending Replication Synchronizations"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "DS Directory Reads/Sec"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "DS Directory Searches/Sec"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "DS Directory Writes/Sec"
+                        },
+                        {
+                            "Unit": "Milliseconds",
+                            "Counter": "LDAP Bind Time"
+                        },
+                        {
+                            "Unit": "Count",
+                            "Counter": "LDAP Client Sessions"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "LDAP Searches/sec"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "LDAP Successful Binds/sec"
+                        }
+                    ],
+                    "Category": "NTDS"
+                },
+                {
+                    "Counters": [
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "Kerberos Authentications"
+                        },
+                        {
+                            "Unit": "Count/Second",
+                            "Counter": "NTLM Authentications"
+                        }
+                    ],
+                    "Category": "Security System-Wide Statistics"
+                }
+            ],
+            "Id": "PerformanceCounter",
+            "SourceType": "WindowsPerformanceCounterSource"
+        },
+        {
+            "LogName": "Application",
+            "Id": "ApplicationLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "Security",
+            "Id": "SecurityLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "System",
+            "Id": "SystemLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "DFS Replication",
+            "Id": "DFSReplicationLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "Directory Service",
+            "Id": "DirectoryServiceLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "DNS Server",
+            "Id": "DNSServerLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "Microsoft-Windows-CertificateServicesClient-Lifecycle-System/Operational",
+            "Id": "CertificateServicesClient-Lifecycle-SystemOperationalLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "Microsoft-Windows-DNSServer/Audit",
+            "Id": "DNSServerAuditLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "Microsoft-Windows-Kerberos/Operational",
+            "Id": "KerberosOperationalLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "Microsoft-Windows-Kerberos-Key-Distribution-Center/Operational",
+            "Id": "Kerberos-Key-Distribution-CenterOperationalLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "Microsoft-Windows-NTLM/Operational",
+            "Id": "NTLMOperationalLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "LogName": "Microsoft-Windows-Security-Netlogon/Operational",
+            "Id": "Security-NetlogonOperationalLog",
+            "SourceType": "WindowsEventLogSource"
+        },
+        {
+            "RecordParser": "SingleLine",
+            "Directory": "C:\\DnsLogs",
+            "Id": "DNSLogs",
+            "SourceType": "DirectorySource",
+            "FileNameFilter": "*.log|*.txt"
+        }
+    ],
+    "Sinks": [
+        {
+            "Region": "ReplaceMe",
+            "SinkType": "CloudWatch",
+            "Namespace": "EC2-Domain-Controller-Metrics",
+            "Id": "CloudWatchSink"
+        },
+        {
+            "Id": "ApplicationLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "ApplicationLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "SecurityLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "SecurityLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "SystemLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "SystemLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "DFSReplicationLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "DFSReplicationLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "DirectoryServiceLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "DirectoryServiceLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "DNSServerLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "DNSServerLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "CertificateServicesClient-Lifecycle-SystemOperationalLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "CertificateServicesClient-Lifecycle-SystemOperationalLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "DNSServerAuditLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "DNSServerAuditLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "KerberosOperationalLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "KerberosOperationalLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "Kerberos-Key-Distribution-CenterOperationalLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "Kerberos-Key-Distribution-CenterOperationalLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "NTLMOperationalLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "NTLMOperationalLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "Security-NetlogonOperationalLog-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "Security-NetlogonOperationalLog-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        },
+        {
+            "Id": "DNSLogs-CloudWatchLogsSink",
+            "Format": "json",
+            "Region": "ReplaceMe",
+            "LogStream": "DNSLogs-Stream",
+            "SinkType": "CloudWatchLogs",
+            "LogGroup": "{ComputerName}-Log-Group",
+            "BufferInterval": "60"
+        }
+    ],
+    "Pipes": [
+        {
+            "SourceRef": "PerformanceCounter",
+            "Id": "PerformanceCounterToCloudWatch",
+            "SinkRef": "CloudWatchSink"
+        },
+        {
+            "SourceRef": "ApplicationLog",
+            "Id": "ApplicationLogToCloudWatch",
+            "SinkRef": "ApplicationLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "SecurityLog",
+            "Id": "SecurityLogToCloudWatch",
+            "SinkRef": "SecurityLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "SystemLog",
+            "Id": "SystemLogToCloudWatch",
+            "SinkRef": "SystemLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "DFSReplicationLog",
+            "Id": "DFSReplicationLogToCloudWatch",
+            "SinkRef": "DFSReplicationLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "DirectoryServiceLog",
+            "Id": "DirectoryServiceLogToCloudWatch",
+            "SinkRef": "DirectoryServiceLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "DNSServerLog",
+            "Id": "DNSServerLogToCloudWatch",
+            "SinkRef": "DNSServerLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "CertificateServicesClient-Lifecycle-SystemOperationalLog",
+            "Id": "CertificateServicesClient-Lifecycle-SystemOperationalLogToCloudWatch",
+            "SinkRef": "CertificateServicesClient-Lifecycle-SystemOperationalLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "DNSServerAuditLog",
+            "Id": "DNSServerAuditLogToCloudWatch",
+            "SinkRef": "DNSServerAuditLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "KerberosOperationalLog",
+            "Id": "KerberosOperationalLogToCloudWatch",
+            "SinkRef": "KerberosOperationalLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "Kerberos-Key-Distribution-CenterOperationalLog",
+            "Id": "Kerberos-Key-Distribution-CenterOperationalLogToCloudWatch",
+            "SinkRef": "Kerberos-Key-Distribution-CenterOperationalLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "NTLMOperationalLog",
+            "Id": "NTLMOperationalLogToCloudWatch",
+            "SinkRef": "NTLMOperationalLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "Security-NetlogonOperationalLog",
+            "Id": "Security-NetlogonOperationalLogToCloudWatch",
+            "SinkRef": "Security-NetlogonOperationalLog-CloudWatchLogsSink"
+        },
+        {
+            "SourceRef": "DNSLogs",
+            "Id": "DNSLogsToCloudWatch",
+            "SinkRef": "DNSLogs-CloudWatchLogsSink"
+        }
+    ],
+    "SelfUpdate": 0
+}

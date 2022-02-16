@@ -136,7 +136,33 @@ Function Set-PostDcPromo {
     # Main
     #==================================================
 
-    [string]$Token = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '3600'} -Method 'PUT' -Uri 'http://169.254.169.254/latest/api/token'
+    $Logs = @(
+        'Microsoft-Windows-CertificateServicesClient-Lifecycle-System/Operational',
+        'Microsoft-Windows-DNSServer/Audit',
+        'Microsoft-Windows-Kerberos-Key-Distribution-Center/Operational',
+        'Microsoft-Windows-NTLM/Operational',
+        'Microsoft-Windows-Kerberos/Operational',
+        'Microsoft-Windows-Security-Netlogon/Operational'
+    )
+
+    Foreach ($Log in $Logs) {
+        Try {
+            $IsEnabled = Get-WinEvent -ListLog $Log -ErrorAction Stop | Select-Object -ExpandProperty 'IsEnabled'
+        } Catch [System.Exception] {
+            Write-ToLog -InvocationName $ServiceName -LogData "Unable to get log $Log $_" -Severity 'ERROR'
+        }
+        If ($IsEnabled -eq 'False') {
+            Try {
+                $SetIsEnabled = New-Object -TypeName 'System.Diagnostics.Eventing.Reader.EventLogConfiguration' $Log
+                $SetIsEnabled.IsEnabled=$true
+                $SetIsEnabled.SaveChanges()
+            } Catch [System.Exception] {
+                Write-ToLog -InvocationName $ServiceName -LogData "Unable to enable log $Log $_" -Severity 'ERROR'
+            }
+        }
+    }
+
+    [string]$Token = Invoke-RestMethod -Headers @{ 'X-aws-ec2-metadata-token-ttl-seconds' = '3600' } -Method 'PUT' -Uri 'http://169.254.169.254/latest/api/token' -UseBasicParsing -ErrorAction Stop
 
     Write-ToLog -InvocationName $ServiceName -LogData 'Getting NIC information' -Severity 'INFO'
     Try {
@@ -304,7 +330,11 @@ Function Set-PostDcPromo {
         }
 
         Foreach ($Group in $Groups) {
-            $GroupPresent = Get-ADGroup -Identity $Group.Name -ErrorAction SilentlyContinue
+            Try {
+                $GroupPresent = Get-ADGroup -Identity $Group.Name -ErrorAction SilentlyContinue
+            } Catch {
+                $GroupPresent = $Null
+            }
             If (-not $GroupPresent) {
                 Write-ToLog -InvocationName $ServiceName -LogData "Creating management groups $($Group.Name)" -Severity 'INFO'
                 Try {
@@ -373,12 +403,22 @@ Function Set-PostDcPromo {
     Write-ToLog -InvocationName $ServiceName -LogData 'Restarting DNS server service' -Severity 'INFO'
     $Null = Restart-Service 'DNS' -ErrorAction SilentlyContinue
 
+    Write-ToLog -InvocationName $ServiceName -LogData 'Setting DNS server diagnostics' -Severity 'INFO'
+    Try {
+        Set-DnsServerDiagnostics -All $true -ErrorAction Stop
+        Start-Sleep -Seconds 5
+        Set-DnsServerDiagnostics -LogFilePath 'c:\DnsLogs\DNSlog.txt' -MaxMBFileSize '500000000' -ErrorAction Stop
+    } Catch [System.Exception] {
+        Write-ToLog -InvocationName $ServiceName -LogData "Failed to set DNS server diagnostics $_" -Severity 'ERROR'
+        Exit 1
+    }
+    
     Start-Sleep -Seconds 10
 
     $CIDRUrl = $InstanceMetaDataUri + "network/interfaces/macs/$MacFormated/vpc-ipv4-cidr-blocks"
     Write-ToLog -InvocationName $ServiceName -LogData 'Getting VPC CIDR block' -Severity 'INFO'
     Try {
-        $CIDR = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token} -Method 'GET' -Uri $CIDRUrl
+        $CIDR = Invoke-RestMethod -Headers @{ 'X-aws-ec2-metadata-token' = $Token } -Method 'GET' -Uri $CIDRUrl -UseBasicParsing -ErrorAction Stop
     } Catch [System.Exception] {
         Write-ToLog -InvocationName $ServiceName -LogData "Failed to get CIDR block $_" -Severity 'ERROR'
         Exit 1
@@ -438,7 +478,7 @@ Function Set-PostDcPromo {
    
     Write-ToLog -InvocationName $ServiceName -LogData 'Getting region' -Severity 'INFO'
     Try {
-        $Region = (Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token} -Method 'GET' -Uri 'http://169.254.169.254/latest/dynamic/instance-identity/document' -ErrorAction Stop | Select-Object -ExpandProperty 'Region').ToUpper()
+        $Region = (Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token } -Method 'GET' -Uri 'http://169.254.169.254/latest/dynamic/instance-identity/document' -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'Region').ToUpper()
     } Catch [System.Exception] {
         Write-ToLog -InvocationName $ServiceName -LogData "Failed to get region $_" -Severity 'ERROR'
         Exit 1
@@ -672,7 +712,11 @@ Function Set-PostDcPromoPdce {
         } 
 
         Foreach ($Group in $Groups) {
-            $GroupPresent = Get-ADGroup -Identity $Group.Name -ErrorAction SilentlyContinue
+            Try {
+                $GroupPresent = Get-ADGroup -Identity $Group.Name -ErrorAction SilentlyContinue
+            } Catch {
+                $GroupPresent = $Null
+            }
             If (-not $GroupPresent) {
                 Write-ToLog -InvocationName $ServiceName -LogData "Creating management groups $($Group.Name)" -Severity 'INFO'
                 Try {
@@ -801,14 +845,14 @@ Function Set-PostDcPromoPdce {
             }
         }
 
-        Write-ToLog -InvocationName $ServiceName -LogData "Removing Default Domain Controllers Policy link from OU=Domain Controllers,$BaseDn"  -Severity 'INFO'
+        Write-ToLog -InvocationName $ServiceName -LogData "Removing Default Domain Controllers Policy link from OU=Domain Controllers,$BaseDn" -Severity 'INFO'
         Remove-GPLink -Name 'Default Domain Controllers Policy' -Target "OU=Domain Controllers,$BaseDn" -ErrorAction SilentlyContinue
 
-        $SAs = Get-ADGroupMember 'Schema Admins' -ErrorAction SilentlyContinue| Select-Object -ExpandProperty 'Name'
+        $SAs = Get-ADGroupMember 'Schema Admins' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty 'Name'
         If ($SAs) {
             Foreach ($SA in $SAs) {
                 Try {
-                    Remove-ADGroupMember -Identity 'Schema Admins' -Members $Blah -Confirm:$False -ErrorAction Stop
+                    Remove-ADGroupMember -Identity 'Schema Admins' -Members $SA -Confirm:$False -ErrorAction Stop
                 } Catch [System.Exception] {
                     Write-ToLog -InvocationName $ServiceName -LogData "Failed to remove $SA from Schema Admins $_" -Severity 'ERROR'
                 }
@@ -872,7 +916,11 @@ Function Set-PostMadPromo {
     )
 
     Foreach ($Group in $Groups) {
-        $GroupPresent = Get-ADGroup -Identity $Group.Name -ErrorAction SilentlyContinue
+        Try {
+            $GroupPresent = Get-ADGroup -Identity $Group.Name -ErrorAction SilentlyContinue
+        } Catch {
+            $GroupPresent = $Null
+        }
         If (-not $GroupPresent) {
             Write-ToLog -InvocationName $ServiceName -LogData "Creating management groups $($Group.Name)" -Severity 'INFO'
             Try {
@@ -1426,8 +1474,8 @@ Function Set-ADConnectorAcl {
     
     Write-ToLog -InvocationName $ServiceName -LogData 'Getting Schema GUIDs' -Severity 'INFO'
     Try {
-        [System.GUID]$ServicePrincipalNameGuid = Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'servicePrincipalName' } -Properties 'schemaIDGUID' -ErrorAction Stop | Select-Object -ExpandProperty 'schemaIDGUID'
-        [System.GUID]$ComputerNameGuid = Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'computer' } -Properties 'schemaIDGUID' -ErrorAction Stop | Select-Object -ExpandProperty 'schemaIDGUID'
+        [System.GUID]$ServicePrincipalNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'servicePrincipalName' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
+        [System.GUID]$ComputerNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'computer' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
     } Catch [System.Exception] {
         Write-ToLog -InvocationName $ServiceName -LogData "Failed to get Schema GUIDs $_" -Severity 'ERROR'
         Exit 1

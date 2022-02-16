@@ -52,6 +52,7 @@ Class SetRC4Key {
 
     [Void] Set() {
         If ($This.Ensure -eq [Ensure]::Present) {
+            Write-Verbose -Message "Setting registry key and value $($This.Key) & $($This.ValueName)"
             $KeyPresent = Get-Item -Path "Registry::$($This.Key)" -ErrorAction SilentlyContinue
             If (-not $KeyPresent) {
                 $CiphersSubPath = $($This.Key).Substring($($This.Key).IndexOf('\') + 1)
@@ -66,6 +67,7 @@ Class SetRC4Key {
                 Set-ItemProperty -Path "Registry::$($This.Key)" -Name $This.ValueName -Value $This.ValueData
             } 
         } Else {
+            Write-Verbose -Message "Removing registry key and value $($This.Key) & $($This.ValueName)"
             Remove-ItemProperty -Path "Registry::$($This.Key)" -Name $This.ValueName 
         }        
     }
@@ -120,6 +122,7 @@ Class RegistryKeyAndValue {
 
     [Void] Set() {
         If ($This.Ensure -eq [Ensure]::Present) {
+            Write-Verbose -Message "Setting registry key and value $($This.Key) & $($This.ValueName)"
             $KeyPresent = Get-Item -Path "Registry::$($This.Key)" -ErrorAction SilentlyContinue
             If (-not $KeyPresent) {
                 $CiphersSubPath = $($This.Key).Substring($($This.Key).IndexOf('\') + 1)
@@ -134,6 +137,7 @@ Class RegistryKeyAndValue {
                 Set-ItemProperty -Path "Registry::$($This.Key)" -Name $This.ValueName -Value $This.ValueData -Force
             } 
         } Else {
+            Write-Verbose -Message "Removing registry key and value $($This.Key) & $($This.ValueName)"
             Remove-ItemProperty -Path "Registry::$($This.Key)" -Name $This.ValueName 
         }        
     }
@@ -170,8 +174,10 @@ Class SetCipherSuite {
 
     [Void] Set() {
         If ($This.Ensure -eq [Ensure]::Present) {
+            Write-Verbose -Message "Enabling cipher suite $($This.ValueName)"
             Enable-TlsCipherSuite -Name $This.ValueName
         } Else {
+            Write-Verbose -Message "Disabling cipher suite $($This.ValueName)"
             Disable-TlsCipherSuite -Name $This.ValueName
         }        
     }
@@ -529,6 +535,7 @@ Class SetAdvAudit {
         $CatName = $This.Category
         $CatSetting = $This.Setting
         If ($This.Ensure -eq [Ensure]::Present) {
+            Write-Verbose -Message "Setting Active Directory advanced audititing $($This.CatName) and $($This.Setting)"
             $Param = $Null
             Switch ($CatSetting) {
                 'Success' { $Param = '/success:enable /failure:disable' }
@@ -539,6 +546,7 @@ Class SetAdvAudit {
             }
             $ArgumentList = '/set', "/subcategory:`"$CatName`"", $Param
         } Else {
+            Write-Verbose -Message "Disabling Active Directory advanced audititing $($This.CatName) and $($This.Setting)"
             $ArgumentList = '/set', "/subcategory:`"$CatName`"", '/success:disable', '/failure:disable'
         }  
         $Process = Start-Process -FilePath 'Auditpol.exe' -ArgumentList $ArgumentList -NoNewWindow -Wait -PassThru

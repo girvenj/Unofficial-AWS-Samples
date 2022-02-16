@@ -44,6 +44,9 @@ Try {
     Exit 1
 }
 
+$KtVersion = Invoke-WebRequest 'https://github.com/awslabs/kinesis-agent-windows/releases/latest' -Headers @{"Accept"="application/json"} -UseBasicParsing | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'tag_name'
+$KtVersionMinusV = $KtVersion.Substring(1)
+
 #==================================================
 # Functions
 #==================================================
@@ -72,7 +75,7 @@ Configuration AwsDriversInstall {
         AwsDriverPvInstaller PV {
             Ensure        = 'Present'  
             DeviceName    = 'AWS PV Drivers'
-            DriverVersion = '8.4.0'
+            DriverVersion = '8.4.1'
             URL           = 'https://s3.amazonaws.com/ec2-windows-drivers-downloads/AWSPV/Latest/AWSPVDriver.zip'
         }
     }
@@ -590,8 +593,8 @@ Configuration SoftwareInstall {
         MsiInstaller KinesisAgent {
             Ensure          = 'Present'  
             SoftwareName    = 'Amazon Kinesis Agent for Microsoft Windows'
-            SoftwareVersion = '1.1.227.1'
-            URL             = 'https://github.com/awslabs/kinesis-agent-windows/releases/download/1.1.227.1/AWSKinesisTap.1.1.227.1.msi'
+            SoftwareVersion = $KtVersionMinusV
+            URL             = "https://github.com/awslabs/kinesis-agent-windows/releases/download/$KtVersion/AWSKinesisTap.$KtVersionMinusV.msi"
         }
         <#MsiInstaller CWAgent {
             Ensure          = 'Present'  
@@ -602,7 +605,7 @@ Configuration SoftwareInstall {
         ExeInstaller SSMAgent {
             Ensure          = 'Present'  
             SoftwareName    = 'Amazon SSM Agent'
-            SoftwareVersion = '3.1.715.0'
+            SoftwareVersion = '3.1.804.0'
             URL             = 'https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe'
         }
         <#DotNetOfflineInstall DotNet48 {

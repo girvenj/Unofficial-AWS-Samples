@@ -157,7 +157,7 @@ mainSteps:
             - Key: Environment
               Value: Production
             - Key: OS
-              Value: Windows Server 2019 Full
+              Value: Windows Server 2022 Full
             - Key: Role
               Value: Domain Controller
         - ResourceType: network-interface
@@ -174,9 +174,16 @@ mainSteps:
         Type: String
     nextStep: waitForRootDCBoot
   - name: waitForRootDCBoot
-    action: aws:sleep
+    action: aws:waitForAwsResourceProperty
+    timeoutSeconds: 600
     inputs:
-      Duration: PT2M
+      Service: ec2
+      Api: DescribeInstanceStatus
+      InstanceIds:
+      - '{{launchRootDC.rootInstanceId}}'
+      PropertySelector: $.InstanceStatuses[0].InstanceStatus.Status
+      DesiredValues:
+      - ok
     nextStep: configureRootDC
   - name: configureRootDC
     action: aws:runCommand
@@ -191,11 +198,6 @@ mainSteps:
         commands: |-
           $Password = (Get-SecretCreds -DomainNetBIOSName '{{RootDomainNetBIOSName}}' -SecretArn '{{RootSecretArn}}').UserPW
           Set-LabInstance -ComputerName '{{RootDCNetBIOSName}}' -Role 'FirstRootDomainController' -Password $Password
-    nextStep: waitForRootDCConfigReboot
-  - name: waitForRootDCConfigReboot
-    action: aws:sleep
-    inputs:
-      Duration: PT2M
     nextStep: promoteRootDC
   - name: promoteRootDC
     action: aws:runCommand
@@ -210,8 +212,8 @@ mainSteps:
         commands: |-
           $SafeModeAdministratorPassword = (Get-SecretCreds -DomainNetBIOSName '{{RootDomainNetBIOSName}}' -SecretArn '{{RestoreModeSecretArn}}').UserPW
           Set-DcPromo -Type 'First' -DomainName '{{RootDomainDNSName}}' -SafeModeAdministratorPassword $SafeModeAdministratorPassword -NetbiosName '{{RootDomainNetBIOSName}}' -Mode '7'
-    nextStep: waitForRootDCPromo
-  - name: waitForRootDCPromo
+    nextStep: WaitforRootDCPromo
+  - name: WaitforRootDCPromo
     action: aws:sleep
     inputs:
       Duration: PT10M

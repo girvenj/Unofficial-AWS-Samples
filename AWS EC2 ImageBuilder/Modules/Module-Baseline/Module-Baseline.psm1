@@ -29,15 +29,31 @@ Function Set-LabInstance {
         }
     }
 
+    Write-ToLog -InvocationName $ServiceName -LogData 'Getting region' -Severity 'INFO'
+    Try {
+        [string]$Token = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '3600'} -Method 'PUT' -Uri 'http://169.254.169.254/latest/api/token' -UseBasicParsing -ErrorAction Stop
+        $Region = (Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token} -Method 'GET' -Uri 'http://169.254.169.254/latest/dynamic/instance-identity/document' -UseBasicParsing  -ErrorAction Stop | Select-Object -ExpandProperty 'Region').ToUpper()
+    } Catch [System.Exception] {
+        Write-ToLog -InvocationName $ServiceName -LogData "Failed to get region $_" -Severity 'ERROR'
+        Exit 1
+    }
+
+    Switch ($Role) {
+        'FirstRootDomainController' { $Appsettings = 'AD-appsettings.json' }
+        'AdditionalDomainController' { $Appsettings = 'AD-appsettings.json' }
+        'Standalone' { $Appsettings = 'appsettings.json' } 
+        'MemberServer' { $Appsettings = 'appsettings.json' }
+    }
+    
     Write-ToLog -InvocationName $ServiceName -LogData 'Getting appsettings.json content' -Severity 'INFO'
     Try {
-        $KenesisAgentSettings = Get-Content 'C:\ConfigFiles\Baseline\appsettings.json' -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $KenesisAgentSettings = Get-Content "C:\ConfigFiles\$Appsettings" -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     } Catch [System.Exception] {
         Write-ToLog -InvocationName $ServiceName -LogData "Unable to get appsettings.json content $_" -Severity 'ERROR'
         Exit 1
     }
 
-    $KenesisAgentSettings.Sinks | Where-Object { $_.Region -eq 'ReplaceMe' } | ForEach-Object { $_.Region = 'us-west-2' }
+    $KenesisAgentSettings.Sinks | Where-Object { $_.Region -eq 'ReplaceMe' } | ForEach-Object { $_.Region = $Region }
 
     Write-ToLog -InvocationName $ServiceName -LogData 'Exporting appsettings.json content' -Severity 'INFO'
     Try {
@@ -123,14 +139,14 @@ Function Set-LabInstance {
         'FirstRootDomainController' {
             If ($InstallationType -eq 'Server') {
                 Try {
-                    $Null = Install-WindowsFeature -Name 'AD-Domain-Services', 'DNS', 'RSAT-DFS-Mgmt-Con' -IncludeManagementTools -ErrorAction Stop
+                    $Null = Install-WindowsFeature -Name 'AD-Domain-Services', 'DNS', 'GPMC', 'RSAT-DFS-Mgmt-Con' -IncludeManagementTools -ErrorAction Stop
                 } Catch [System.Exception] {
                     Write-ToLog -InvocationName $ServiceName -LogData "Failed to install Windows features $_" -Severity 'ERROR'
                     Exit 1
                 }
             } Else {
                 Try {
-                    $Null = Install-WindowsFeature -Name 'AD-Domain-Services', 'DNS' -IncludeManagementTools -ErrorAction Stop
+                    $Null = Install-WindowsFeature -Name 'AD-Domain-Services', 'DNS', 'GPMC' -IncludeManagementTools -ErrorAction Stop
                 } Catch [System.Exception] {
                     Write-ToLog -InvocationName $ServiceName -LogData "Failed to install Windows Features $_" -Severity 'ERROR'
                     Exit 1
@@ -146,14 +162,14 @@ Function Set-LabInstance {
         'AdditionalDomainController' { 
             If ($InstallationType -eq 'Server') {
                 Try {
-                    $Null = Install-WindowsFeature -Name 'AD-Domain-Services', 'DNS', 'RSAT-DFS-Mgmt-Con' -IncludeManagementTools -ErrorAction Stop
+                    $Null = Install-WindowsFeature -Name 'AD-Domain-Services', 'DNS', 'GPMC', 'RSAT-DFS-Mgmt-Con' -IncludeManagementTools -ErrorAction Stop
                 } Catch [System.Exception] {
                     Write-ToLog -InvocationName $ServiceName -LogData "Failed to install Windows features $_" -Severity 'ERROR'
                     Exit 1
                 }
             } Else {
                 Try {
-                    $Null = Install-WindowsFeature -Name 'AD-Domain-Services', 'DNS' -IncludeManagementTools -ErrorAction Stop
+                    $Null = Install-WindowsFeature -Name 'AD-Domain-Services', 'DNS', 'GPMC' -IncludeManagementTools -ErrorAction Stop
                 } Catch [System.Exception] {
                     Write-ToLog -InvocationName $ServiceName -LogData "Failed to install Windows features $_" -Severity 'ERROR'
                     Exit 1
@@ -298,6 +314,7 @@ Function Get-PsModules {
         'AWS.Tools.EBS',
         'AWS.Tools.S3',
         'AWS.Tools.SecretsManager',
+        'AWS.Tools.SimpleSystemsManagement',
         'AWS.Tools.Common',
         'NetworkingDsc', 
         'ComputerManagementDsc',
@@ -744,4 +761,41 @@ Function Invoke-Sysprep {
     $SysPrepXml.Save($SysPrepFile)
     & ec2launch.exe sysprep -c -s
     Remove-Item (Get-PSReadlineOption).HistorySavePath -ErrorAction SilentlyContinue
+}
+
+Function Get-EniConfig {
+    Write-ToLog -InvocationName $ServiceName -LogData 'Getting network configuration' -Severity 'INFO'
+    Try {
+        $NetIpConfig = Get-NetIPConfiguration -ErrorAction Stop
+    } Catch [System.Exception] {
+        Write-ToLog -InvocationName $ServiceName -LogData "Failed to get network configuration $_" -Severity 'ERROR'
+        Exit 1
+    }
+
+    Write-ToLog -InvocationName $ServiceName -LogData 'Grabbing the current gateway address in order to static IP correctly'
+    $GatewayAddress = $NetIpConfig | Select-Object -ExpandProperty 'IPv4DefaultGateway' | Select-Object -ExpandProperty 'NextHop'
+
+    Write-ToLog -InvocationName $ServiceName -LogData 'Formatting IP address in format needed for IPAdress DSC resource' -Severity 'INFO'
+    $IpAddress = $NetIpConfig | Select-Object -ExpandProperty 'IPv4Address' | Select-Object -ExpandProperty 'IpAddress'
+    $Prefix = $NetIpConfig | Select-Object -ExpandProperty 'IPv4Address' | Select-Object -ExpandProperty 'PrefixLength'
+    $InterfaceAlias = $NetIpConfig | Select-Object -ExpandProperty 'InterfaceAlias'                                       
+    $IpAddr = 'IP/CIDR' -replace 'IP', $IpAddress -replace 'CIDR', $Prefix
+
+    Write-ToLog -InvocationName $ServiceName -LogData 'Getting MAC address' -Severity 'INFO'
+    Try {
+        $MacAddress = Get-NetAdapter -ErrorAction Stop | Select-Object -ExpandProperty 'MacAddress'
+    } Catch [System.Exception] {
+        Write-ToLog -InvocationName $ServiceName -LogData "Failed to get MAC address $_" -Severity 'ERROR'
+        Exit 1
+    }
+
+    $Output = [PSCustomObject][Ordered]@{
+        'GatewayAddress' = $GatewayAddress
+        'IpAddress' = $IpAddr
+        'DnsIpAddress' = $IpAddress
+        'MacAddress' = $MacAddress
+        'InterfaceAlias' = $InterfaceAlias
+    }
+
+    Return $Output
 }

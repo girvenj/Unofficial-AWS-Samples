@@ -222,7 +222,7 @@
       Api: CreateRole
       AssumeRolePolicyDocument: >-
         {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}
-      RoleName: SSMCore
+      RoleName: SSMCore+CWL
     nextStep: attachManagedSSMPolicy
   - name: attachManagedSSMPolicy
     action: aws:executeAwsApi
@@ -231,7 +231,7 @@
       Service: iam
       Api: AttachRolePolicy
       PolicyArn: 'arn:aws:iam::aws:policy/service-role/AmazonSSMManagedInstanceCore'
-      RoleName: SSMCore
+      RoleName: SSMCore+CWL
     nextStep: attachManagedCWPolicy
   - name: attachManagedCWPolicy
     action: aws:executeAwsApi
@@ -240,7 +240,7 @@
       Service: iam
       Api: AttachRolePolicy
       PolicyArn: 'arn:aws:iam::aws:policy/service-role/CloudWatchAgentServerPolicy'
-      RoleName: SSMCore
+      RoleName: SSMCore+CWL
     nextStep: createSSMInstanceProfile
   - name: createSSMInstanceProfile
     action: aws:executeAwsApi
@@ -248,7 +248,7 @@
     inputs:
       Service: iam
       Api: CreateInstanceProfile
-      InstanceProfileName: SSMCore
+      InstanceProfileName: SSMCore+CWL
     outputs:
       - Name: instanceProfileArn
         Selector: $.InstanceProfile.Arn
@@ -260,8 +260,8 @@
     inputs:
       Service: iam
       Api: AddRoleToInstanceProfile
-      InstanceProfileName: SSMCore
-      RoleName: SSMCore
+      InstanceProfileName: SSMCore+CWL
+      RoleName: SSMCore+CWL
     nextStep: putRolePolicy
   - name: putRolePolicy
     action: aws:executeAwsApi
@@ -287,7 +287,7 @@
             ]
         }
       PolicyName: 'TempSecretAccess{{global:ACCOUNT_ID}}'
-      RoleName: SSMCore
+      RoleName: SSMCore+CWL
 
   - name: getVpcId
     action: aws:executeAwsApi

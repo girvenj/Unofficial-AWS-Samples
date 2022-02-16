@@ -43,7 +43,7 @@ parameters:
     description: NetBIOS name of the domain (up to 15 characters) you would like to join to for users of earlier versions of Windows e.g. EXAMPLE
     type: String
   InstanceRoleName:
-    default: SSMCore
+    default: SSMCore+CWL
     description: Instance Role Name to launch EC2 instance with
     type: String
   OrCaHashAlgorithm:
@@ -79,8 +79,8 @@ parameters:
     type: String
   SecurityGroupId:
     default:
-      - sg-0482d7dc863da9114
-      - sg-092eae60d142c5076
+      - sg-00925bfa64112a869
+      - sg-08654c41fd3c9b0bf
     description: Security Group the CAs will use
     type: StringList
   SubCaHashAlgorithm:
@@ -111,7 +111,7 @@ parameters:
     description: Length in years for the Sub Enterpise CA Ceritificate
     type: String
   SubnetId:
-    default: subnet-0f3d40ba8e84edeee
+    default: subnet-0ddc03361b9ad7b07
     description: Subnet ID where CAs will be deployed to
     type: String
   UseS3ForCRL:

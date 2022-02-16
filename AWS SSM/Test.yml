@@ -20,3 +20,26 @@
       - Name: adminSecret
         Selector: '$.ARN'
         Type: 'String'
+
+
+{
+"name": "waitForEC2RescueInstanceToBeManaged",
+"action": "aws:waitForAwsResourceProperty",
+"onFailure": "step:rebootEC2RescueInstance",
+"timeoutSeconds": "600",
+"inputs": {
+  "Service": "ssm",
+  "Api": "DescribeInstanceInformation",
+  "InstanceInformationFilterList": [
+    {
+      "key": "InstanceIds",
+      "valueSet": [
+        "{{ describeEC2RescueInstance.EC2RescueInstanceId }}"
+      ]
+    }
+  ],
+  "PropertySelector": "$.InstanceInformationList[0].PingStatus",
+  "DesiredValues": [
+    "Online"
+  ]
+},
