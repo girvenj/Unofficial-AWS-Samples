@@ -299,6 +299,13 @@ Resources:
                 - Key: StackName
                   Value:
                       Ref: AWS::StackName
+    RdsDBSubnetGroup:
+        Type: AWS::RDS::DBSubnetGroup
+        Properties:
+            DBSubnetGroupDescription: Demo-DBSubnetGroup
+            SubnetIds:
+                - !Ref VPCPublicSubnet1Subnet
+                - !Ref VPCPublicSubnet2Subnet
     DomainMemberSG:
         Type: AWS::EC2::SecurityGroup
         Properties:
@@ -448,26 +455,21 @@ Resources:
             SourceSecurityGroupId:
                 Ref: OnPremDomainControllerSG
             ToPort: -1
-    ManagedAD:
-        Type: AWS::DirectoryService::MicrosoftAD
+    R53RROutbound:
+        Type: AWS::Route53Resolver::ResolverEndpoint
         Properties:
-            CreateAlias: false
-            Edition: Enterprise
-            EnableSso: false
-            Name: !Ref MADDomainName
-            Password: !Ref AdminPassword
-            ShortName: !Ref MADNetBIOSName
-            VpcSettings:
-                SubnetIds:
-                    - !Ref VPCPublicSubnet1Subnet
-                    - !Ref VPCPublicSubnet2Subnet
-                VpcId: !Ref VPC
+            Direction: Outbound
+            IpAddresses:
+                - SubnetId: !Ref VPCPublicSubnet1Subnet
+                - SubnetId: !Ref VPCPublicSubnet2Subnet
+            SecurityGroupIds:
+                - !Ref 'DomainMemberSG'
     MgmtInstanceSSMAuto:
         Type: AWS::SSM::Document
         Properties:
             Content:
                 schemaVersion: "0.3"
-                description: Deploy AD with SSM Automation
+                description: Deploy Management Instance with PKI using SSM Automation
                 parameters:
                     AdminPassword:
                         description: Password for the Admin account (Also used to create the trust)
@@ -478,17 +480,20 @@ Resources:
                     DomainNetBIOSName:
                         description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. EXAMPLE
                         type: String
-                    ExistingDcIP01:
-                        description: IP of DNS server that can resolve domain (Must be accessible)
+                    MadDirectoryID:
+                        description: Directory ID of MAD domain
                         type: String
-                    ExistingDcIP02:
-                        description: IP of DNS server that can resolve domain (Must be accessible)
+                    OnpremDomainDNSName:
+                        description: Fully qualified domain name (FQDN) of the forest root domain e.g. example.com
                         type: String
-                    MgmtServerNetBIOSName:
+                    ServerNetBIOSName:
                         description: NetBIOS name of the Management Instance server (up to 15 characters)
                         type: String
                     StackName:
                         description: Stack Name Input for cfn resource signal
+                        type: String
+                    TrustDirection:
+                        description: Trust Direction from AWS Managed Microsft AD to on-premises domain.
                         type: String
                     URLSuffix:
                         description: AWS URL suffix
@@ -497,7 +502,7 @@ Resources:
                         description: CIDR Block for the VPC
                         type: String
                 mainSteps:
-                    - name: mgmtInstanceId
+                    - name: InstanceId
                       action: aws:executeAwsApi
                       onFailure: step:signalFailure
                       inputs:
@@ -505,7 +510,7 @@ Resources:
                           Api: DescribeInstances
                           Filters:
                               - Name: tag:Name
-                                Values: ["{{MgmtServerNetBIOSName}}"]
+                                Values: ["{{ServerNetBIOSName}}"]
                               - Name: tag:aws:cloudformation:stack-name
                                 Values: ["{{StackName}}"]
                               - Name: instance-state-name
@@ -517,10 +522,11 @@ Resources:
                       nextStep: intializeInstance
                     - name: intializeInstance
                       action: aws:runCommand
+                      onFailure: step:signalFailure
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{mgmtInstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -541,6 +547,10 @@ Resources:
                                         @{
                                             Name = 'DnsServerDsc'
                                             Version = '3.0.0'
+                                        },
+                                        @{
+                                            Name = 'AuditPolicyDsc'
+                                            Version = '1.4.0.0'
                                         }
                                     )
 
@@ -737,10 +747,11 @@ Resources:
                       nextStep: configureInstance
                     - name: configureInstance
                       action: aws:runCommand
+                      onFailure: step:signalFailure
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{mgmtInstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     Function Get-EniConfig {
@@ -783,8 +794,6 @@ Resources:
                                             [Parameter(Mandatory = $true)][PSCredential]$DaCredentials,
                                             [Parameter(Mandatory = $true)][string]$DomainDNSName,
                                             [Parameter(Mandatory = $true)][string]$DomainNetBIOSName,
-                                            [Parameter(Mandatory = $false)][string]$ExistingDcIP01,
-                                            [Parameter(Mandatory = $false)][string]$ExistingDcIP02,
                                             [Parameter(Mandatory = $true)][string]$GatewayAddress,
                                             [Parameter(Mandatory = $true)][string]$InstanceIP,
                                             [Parameter(Mandatory = $true)][string]$InstanceNetBIOSName,
@@ -865,7 +874,7 @@ Resources:
                                                     DependsOn = '[IPAddress]SetIP'
                                                 }
                                                 DnsServerAddress DnsServerAddress {
-                                                    Address = $ExistingDcIP01, $ExistingDcIP02, '169.254.169.253'
+                                                    Address = '169.254.169.253'
                                                     InterfaceAlias = 'Primary'
                                                     AddressFamily = 'IPv4'
                                                     DependsOn = '[DefaultGatewayAddress]SetDefaultGateway'
@@ -921,19 +930,20 @@ Resources:
                                     $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
                                     $AltAdminCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
                                     $EniConfig = Get-EniConfig
-                                    Set-DscConfiguration -DaCredentials $AltAdminCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -ExistingDcIP01 '{{ExistingDcIP01}}' -ExistingDcIP02 '{{ExistingDcIP02}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{MgmtServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
+                                    Set-DscConfiguration -DaCredentials $AltAdminCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
                                     Start-DscConfiguration 'C:\Temp\ConfigInstance' -Wait -Verbose -Force
                                     Invoke-DscStatusCheck
                           CloudWatchOutputConfig:
                               CloudWatchOutputEnabled: true
                               CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
-                      nextStep: postConfig
-                    - name: postConfig
+                      nextStep: caConfig
+                    - name: caConfig
                       action: aws:runCommand
+                      onFailure: step:signalFailure
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{mgmtInstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     Function Invoke-EnterpriseCaConfig {
@@ -1501,7 +1511,7 @@ Resources:
                                             [Parameter(Mandatory = $true)][Security.Principal.SecurityIdentifier]$IdentityReference,
                                             [Parameter(Mandatory = $true)][System.DirectoryServices.ActiveDirectoryRights]$ActiveDirectoryRights,
                                             [Parameter(Mandatory = $true)][System.Security.AccessControl.AccessControlType]$AccessControlType,
-                                            [Parameter(Mandatory = $false)][Guid]$ObjectGuid,        
+                                            [Parameter(Mandatory = $false)][Guid]$ObjectGuid,
                                             [Parameter(Mandatory = $false)][System.DirectoryServices.ActiveDirectorySecurityInheritance]$ActiveDirectorySecurityInheritance,
                                             [Parameter(Mandatory = $false)][Guid]$InheritedObjectGuid
                                         )
@@ -1606,6 +1616,171 @@ Resources:
                                         }
                                     }
 
+                                    $CidrRange = @{ IpProtocol = "-1"; IpRanges = '0.0.0.0/0' }
+
+                                    $IP = '{{VPCCIDR}}'.Split('/')[0]
+
+                                    [System.Collections.ArrayList]$IPArray = $IP -Split "\."
+
+                                    $VPCDNS = $IPArray[0, 1, 2] + 2 -Join "."
+
+                                    Write-Output 'Modifying the AWS Managed Microsoft Active Directory Security Group.'
+                                    Try {
+                                        $SecurityGroupId = Get-EC2SecurityGroup -Filter @{ Name = 'group-name'; Values = "{{MadDirectoryID}}_controllers" } -ErrorAction Stop | Select-Object -Property 'GroupId' -ExpandProperty 'GroupId'
+                                        $Null = Grant-EC2SecurityGroupEgress -GroupId $SecurityGroupId -IpPermission $CidrRange -ErrorAction Stop
+                                    } Catch [System.Exception] {
+                                        Write-Output "Failed to get or modify the AWS Managed Microsoft Active Directory Security Group. $_"
+                                        Exit 1
+                                    }
+
+                                    $TrustDirection = '{{TrustDirection}}'
+                                    Switch ($TrustDirection) {
+                                        'Two-Way' {
+                                            $TrustDirMAD = 'Two-Way'
+                                        }
+                                        'One-way' {
+                                            $TrustDirMAD = 'OneWayOutgoing'
+                                        }
+                                        Default { Throw 'InvalidArgument: Invalid value is passed for parameter TrustDirection' }
+                                    }
+
+
+                                    $TrustTypeForest = New-Object -TypeName 'Amazon.DirectoryService.TrustType' -ArgumentList 'Forest'
+                                    $TrustDir = New-Object -TypeName 'Amazon.DirectoryService.TrustDirection' -ArgumentList $TrustDirMAD
+                                    $SelectiveAuthDis = New-Object -TypeName 'Amazon.DirectoryService.SelectiveAuth' -ArgumentList 'Disabled'
+                                    $TrustPassword = '{{AdminPassword}}'
+
+                                    Write-Output 'Creating trust between MAD and Onprem.'
+                                    Try {
+                                        $Trust = New-DSTrust -DirectoryId '{{MadDirectoryID}}' -ConditionalForwarderIpAddr $VPCDNS -RemoteDomainName '{{OnpremDomainDNSName}}' -SelectiveAuth $SelectiveAuthDis -TrustDirection $TrustDir -TrustType $TrustTypeForest -TrustPassword $TrustPassword
+                                    } Catch [System.Exception] {
+                                        Write-Output "Failed to create trust between MAD and Onprem. $_"
+                                        Exit 1
+                                    }
+
+                                    $Counter = 0
+                                    Do {
+                                        Try {
+                                            $Truststate = Get-DSTrust -DirectoryId '{{MadDirectoryID}}' -TrustId $Trust -ErrorAction SilentlyContinue | Select-Object -ExpandProperty 'TrustState' | Select-Object -ExpandProperty 'Value'
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get trust state $_"
+                                            $Truststate = $Null
+                                        }
+                                        If ($Truststate -ne 'Verified' -or $Truststate -eq 'Failed') {
+                                            $Counter ++
+                                            Write-Output 'Trust not Verified, sleeping 10 seconds and will try again.'
+                                            Start-Sleep -Seconds 10
+                                        }
+                                    } Until ($Truststate -eq 'Verified' -or $Truststate -eq 'Failed' -or $Counter -eq 30)
+
+                                    If ($Truststate -eq 'Failed' -or $Counter -eq 30) {
+                                        Write-Output 'Trust failed to create or never went Verified in 5 minutes'
+                                        Exit 1
+                                    }
+
+                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
+                                    $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
+                                    Invoke-EnterpriseCaConfig -Credentials $Credentials -EntCaCommonName '{{ServerNetBIOSName}}' -EntCaHashAlgorithm 'SHA256' -EntCaKeyLength '2048' -EntCaValidityPeriodUnits '5' -VPCCIDR '{{VPCCIDR}}'
+                          CloudWatchOutputConfig:
+                              CloudWatchOutputEnabled: true
+                              CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
+                      nextStep: runPkiInstanceAuditPolSsmAuto
+                    - name: runPkiInstanceAuditPolSsmAuto
+                      action: aws:executeAutomation
+                      onFailure: step:signalFailure
+                      inputs:
+                          DocumentName: !Ref PkiInstanceAuditPolSsmAuto
+                          RuntimeParameters:
+                            ServerNetBIOSName:
+                                - "{{ServerNetBIOSName}}"
+                            StackName:
+                                - "{{StackName}}"
+                            VPCCIDR:
+                                - "{{VPCCIDR}}"
+                    - name: cfnSignalEnd
+                      action: aws:branch
+                      inputs:
+                          Choices:
+                              - NextStep: signalSuccess
+                                Not:
+                                    Variable: "{{StackName}}"
+                                    StringEquals: ""
+                              - NextStep: sleepEnd
+                                Variable: "{{StackName}}"
+                                StringEquals: ""
+                    - name: signalSuccess
+                      action: aws:executeAwsApi
+                      isEnd: True
+                      inputs:
+                          Service: cloudformation
+                          Api: SignalResource
+                          LogicalResourceId: MgmtInstance
+                          StackName: "{{StackName}}"
+                          Status: SUCCESS
+                          UniqueId: "{{InstanceId.InstanceId}}"
+                    - name: sleepEnd
+                      action: aws:sleep
+                      isEnd: True
+                      inputs:
+                          Duration: PT1S
+                    - name: signalFailure
+                      action: aws:executeAwsApi
+                      inputs:
+                          Service: cloudformation
+                          Api: SignalResource
+                          LogicalResourceId: MgmtInstance
+                          StackName: "{{StackName}}"
+                          Status: FAILURE
+                          UniqueId: "{{InstanceId.InstanceId}}"
+            DocumentType: Automation
+            Tags:
+                - Key: StackName
+                  Value: !Ref AWS::StackName
+    PkiInstanceAuditPolSsmAuto:
+        Type: AWS::SSM::Document
+        Properties:
+            Content:
+                schemaVersion: "0.3"
+                description: Configure Kinesis Agent for Windows, Windows Auditing Policy, and deployment cleanup using SSM Automation
+                parameters:
+                    ServerNetBIOSName:
+                        description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
+                        type: String
+                    StackName:
+                        description: Stack Name Input for cfn resource signal
+                        type: String
+                    VPCCIDR:
+                        description: CIDR Block for the VPC
+                        type: String
+                mainSteps:
+                    - name: InstanceId
+                      action: aws:executeAwsApi
+                      inputs:
+                          Service: ec2
+                          Api: DescribeInstances
+                          Filters:
+                              - Name: tag:Name
+                                Values:
+                                    - "{{ServerNetBIOSName}}"
+                              - Name: tag:aws:cloudformation:stack-name
+                                Values:
+                                    - "{{StackName}}"
+                              - Name: instance-state-name
+                                Values:
+                                    - running
+                      outputs:
+                          - Name: InstanceId
+                            Selector: $.Reservations[0].Instances[0].InstanceId
+                            Type: String
+                      nextStep: configureInstance
+                    - name: configureInstance
+                      action: aws:runCommand
+                      inputs:
+                          DocumentName: AWS-RunPowerShellScript
+                          InstanceIds:
+                              - "{{InstanceId.InstanceId}}"
+                          Parameters:
+                              commands: |-
                                     Function Invoke-Cleanup {
                                         [CmdletBinding()]
                                         Param (
@@ -1649,113 +1824,928 @@ Resources:
                                         }
                                     }
 
-                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                                    $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
-                                    Invoke-EnterpriseCaConfig -Credentials $Credentials -EntCaCommonName '{{MgmtServerNetBIOSName}}' -EntCaHashAlgorithm 'SHA256' -EntCaKeyLength '2048' -EntCaValidityPeriodUnits '5' -VPCCIDR '{{VPCCIDR}}'
+                                    Function Set-DscConfiguration {
+                                        Write-Output 'Getting the DSC encryption thumbprint to secure the MOF file'
+                                        Try {
+                                            $DscCertThumbprint = Get-ChildItem -Path 'cert:\LocalMachine\My' -ErrorAction Stop | Where-Object { $_.Subject -eq 'CN=DscEncryptCert' } | Select-Object -ExpandProperty 'Thumbprint'
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get DSC cert thumbprint $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating configuration data block that has the certificate information for DSC configuration processing'
+                                        $ConfigurationData = @{
+                                            AllNodes = @(
+                                                @{
+                                                    NodeName = '*'
+                                                    CertificateFile = 'C:\Temp\publickeys\DscPublicKey.cer'
+                                                    Thumbprint = $DscCertThumbprint
+                                                    PSDscAllowDomainUser = $true
+                                                },
+                                                @{
+                                                    NodeName = 'localhost'
+                                                }
+                                            )
+                                        }
+
+                                        Configuration ConfigInstance {
+                                            Import-DscResource -ModuleName 'AuditPolicyDsc'
+                                            Node LocalHost {
+                                                AuditPolicySubcategory CredentialValidationSuccess {
+                                                    Name = 'Credential Validation'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory CredentialValidationFailure {
+                                                    Name = 'Credential Validation'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory KerberosAuthenticationServiceSuccess {
+                                                    Name = 'Kerberos Authentication Service'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory KerberosAuthenticationServiceFailure {
+                                                    Name = 'Kerberos Authentication Service'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory KerberosServiceTicketOperationsSuccess {
+                                                    Name = 'Kerberos Service Ticket Operations'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory KerberosServiceTicketOperationsFailure {
+                                                    Name = 'Kerberos Service Ticket Operations'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory OtherAccountLogonEventsSuccess {
+                                                    Name = 'Other Account Logon Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory OtherAccountLogonEventsFailure {
+                                                    Name = 'Other Account Logon Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory ApplicationGroupManagementSuccess {
+                                                    Name = 'Application Group Management'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory ApplicationGroupManagementFailure {
+                                                    Name = 'Application Group Management'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory ComputerAccountManagementSuccess {
+                                                    Name = 'Computer Account Management'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory ComputerAccountManagementFailure {
+                                                    Name = 'Computer Account Management'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DistributionGroupManagementSuccess {
+                                                    Name = 'Distribution Group Management'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DistributionGroupManagementFailure {
+                                                    Name = 'Distribution Group Management'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory OtherAccountManagementEventsSuccess {
+                                                    Name = 'Other Account Management Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory OtherAccountManagementEventsFailure {
+                                                    Name = 'Other Account Management Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory SecurityGroupManagementSuccess {
+                                                    Name = 'Security Group Management'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory SecurityGroupManagementFailure {
+                                                    Name = 'Security Group Management'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory UserAccountManagementSuccess {
+                                                    Name = 'User Account Management'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory UserAccountManagementFailure {
+                                                    Name = 'User Account Management'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory DPAPIActivitySuccess {
+                                                    Name = 'DPAPI Activity'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory DPAPIActivityFailure {
+                                                    Name = 'DPAPI Activity'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory PNPActivitySuccess {
+                                                    Name = 'Plug and Play Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory PNPActivityFailure {
+                                                    Name = 'Plug and Play Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory ProcessCreationSuccess {
+                                                    Name = 'Process Creation'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory ProcessCreationFailure {
+                                                    Name = 'Process Creation'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory ProcessTerminationSuccess {
+                                                    Name = 'Process Termination'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory ProcessTerminationFailure {
+                                                    Name = 'Process Termination'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory RPCEventsSuccess {
+                                                    Name = 'RPC Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory RPCEventsFailure {
+                                                    Name = 'RPC Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory TokenRightAdjustedSuccess {
+                                                    Name = 'Token Right Adjusted Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory TokenRightAdjustedFailure {
+                                                    Name = 'Token Right Adjusted Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DetailedDirectoryServiceReplicationSuccess {
+                                                    Name = 'Detailed Directory Service Replication'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DetailedDirectoryServiceReplicationFailure {
+                                                    Name = 'Detailed Directory Service Replication'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DirectoryServiceAccessSuccess {
+                                                    Name = 'Directory Service Access'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DirectoryServiceAccessFailure {
+                                                    Name = 'Directory Service Access'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DirectoryServiceChangesSuccess {
+                                                    Name = 'Directory Service Changes'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DirectoryServiceChangesFailure {
+                                                    Name = 'Directory Service Changes'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DirectoryServiceReplicationSuccess {
+                                                    Name = 'Directory Service Replication'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory DirectoryServiceReplicationFailure {
+                                                    Name = 'Directory Service Replication'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory AccountLockoutSuccess {
+                                                    Name = 'Account Lockout'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory AccountLockoutFailure {
+                                                    Name = 'Account Lockout'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory UserDeviceClaimsSuccess {
+                                                    Name = 'User / Device Claims'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory UserDeviceClaimsFailure {
+                                                    Name = 'User / Device Claims'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory GroupMembershipSuccess {
+                                                    Name = 'Group Membership'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory GroupMembershipFailure {
+                                                    Name = 'Group Membership'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory IPsecExtendedModeSuccess {
+                                                    Name = 'IPsec Extended Mode'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory IPsecExtendedModeFailure {
+                                                    Name = 'IPsec Extended Mode'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory IPsecMainModeSuccess {
+                                                    Name = 'IPsec Main Mode'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory IPsecMainModeFailure {
+                                                    Name = 'IPsec Main Mode'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory IPsecQuickModeSuccess {
+                                                    Name = 'IPsec Quick Mode'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory IPsecQuickModeFailure {
+                                                    Name = 'IPsec Quick Mode'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory LogoffSuccess {
+                                                    Name = 'Logoff'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory Logoffailure {
+                                                    Name = 'Logoff'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory LogonSuccess {
+                                                    Name = 'Logon'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory LogonFailure {
+                                                    Name = 'Logon'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory NetworkPolicyServerSuccess {
+                                                    Name = 'Network Policy Server'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory NetworkPolicyServerFailure {
+                                                    Name = 'Network Policy Server'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory OtherLogonLogoffEventsSuccess {
+                                                    Name = 'Other Logon/Logoff Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory OtherLogonLogoffEventsFailure {
+                                                    Name = 'Other Logon/Logoff Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory SpecialLogonSuccess {
+                                                    Name = 'Special Logon'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory SpecialLogonFailure {
+                                                    Name = 'Special Logon'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory ApplicationGeneratedSuccess {
+                                                    Name = 'Application Generated'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory ApplicationGeneratedFailure {
+                                                    Name = 'Application Generated'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory CertificationServicesSuccess {
+                                                    Name = 'Certification Services'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory CertificationServicesFailure {
+                                                    Name = 'Certification Services'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory DetailedFileShareSuccess {
+                                                    Name = 'Detailed File Share'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory DetailedFileShareFailure {
+                                                    Name = 'Detailed File Share'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory FileShareSuccess {
+                                                    Name = 'File Share'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory FileShareFailure {
+                                                    Name = 'File Share'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory FileSystemSuccess {
+                                                    Name = 'File System'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory FileSystemFailure {
+                                                    Name = 'File System'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory FilteringPlatformConnectionSuccess {
+                                                    Name = 'Filtering Platform Connection'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory FilteringPlatformConnectionFailure {
+                                                    Name = 'Filtering Platform Connection'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory FilteringPlatformPacketDropSuccess {
+                                                    Name = 'Filtering Platform Packet Drop'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory FilteringPlatformPacketDropFailure {
+                                                    Name = 'Filtering Platform Packet Drop'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory HandleManipulationSuccess {
+                                                    Name = 'Handle Manipulation'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory HandleManipulationFailure {
+                                                    Name = 'Handle Manipulation'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory KernelObjectSuccess {
+                                                    Name = 'Kernel Object'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory KernelObjectFailure {
+                                                    Name = 'Kernel Object'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory OtherObjectAccessEventsSuccess {
+                                                    Name = 'Other Object Access Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory OtherObjectAccessEventsFailure {
+                                                    Name = 'Other Object Access Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory RegistrySuccess {
+                                                    Name = 'Registry'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory RegistryFailure {
+                                                    Name = 'Registry'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory RemovableStorageSuccess {
+                                                    Name = 'Removable Storage'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory RemovableStorageFailure {
+                                                    Name = 'Removable Storage'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory CentralAccessPolicyStagingSuccess {
+                                                    Name = 'Central Policy Staging'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory CentralAccessPolicyStagingFailure {
+                                                    Name = 'Central Policy Staging'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory AuditPolicyChangeSuccess {
+                                                    Name = 'Audit Policy Change'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory AuditPolicyChangeFailure {
+                                                    Name = 'Audit Policy Change'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory AuthenticationPolicyChangeSuccess {
+                                                    Name = 'Authentication Policy Change'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory AuthenticationPolicyChangeFailure {
+                                                    Name = 'Authentication Policy Change'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory AuthorizationPolicyChangeSuccess {
+                                                    Name = 'Authorization Policy Change'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory AuthorizationPolicyChangeFailure {
+                                                    Name = 'Authorization Policy Change'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory MPSSVCRule-LevelPolicyChangeSuccess {
+                                                    Name = 'MPSSVC Rule-Level Policy Change'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory MPSSVCRule-LevelPolicyChangeFailure {
+                                                    Name = 'MPSSVC Rule-Level Policy Change'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory OtherPolicyChangeEventsSuccess {
+                                                    Name = 'Other Policy Change Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory OtherPolicyChangeEventsFailure {
+                                                    Name = 'Other Policy Change Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory NonSensitivePrivilegeUseSuccess {
+                                                    Name = 'Non Sensitive Privilege Use'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory NonSensitivePrivilegeUseFailure {
+                                                    Name = 'Non Sensitive Privilege Use'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory OtherPrivilegeUseEventsSuccess {
+                                                    Name = 'Other Privilege Use Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory OtherPrivilegeUseEventsFailure {
+                                                    Name = 'Other Privilege Use Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory SensitivePrivilegeUseSuccess {
+                                                    Name = 'Sensitive Privilege Use'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory SensitivePrivilegeUseFailure {
+                                                    Name = 'Sensitive Privilege Use'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory IPsecDriverSuccess {
+                                                    Name = 'IPsec Driver'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory IPsecDriverFailure {
+                                                    Name = 'IPsec Driver'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory OtherSystemEventsSuccess {
+                                                    Name = 'Other System Events'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory OtherSystemEventsFailure {
+                                                    Name = 'Other System Events'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory SecurityStateChangeSuccess {
+                                                    Name = 'Security State Change'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory SecurityStateChangeFailure {
+                                                    Name = 'Security State Change'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory SecuritySystemExtensionSuccess {
+                                                    Name = 'Security System Extension'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory SecuritySystemExtensionFailure {
+                                                    Name = 'Security System Extension'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Absent'
+                                                }
+                                                AuditPolicySubcategory SystemIntegritySuccess {
+                                                    Name = 'System Integrity'
+                                                    AuditFlag = 'Success'
+                                                    Ensure = 'Present'
+                                                }
+                                                AuditPolicySubcategory SystemIntegrityFailure {
+                                                    Name = 'System Integrity'
+                                                    AuditFlag = 'Failure'
+                                                    Ensure = 'Present'
+                                                }
+                                            }
+                                        }
+                                        Write-Output 'Generating MOF file'
+                                        ConfigInstance -OutputPath 'C:\Temp\AuditConfigInstance' -ConfigurationData $ConfigurationData
+                                    }
+
+                                    Function Invoke-DscStatusCheck {
+                                        $LCMState = Get-DscLocalConfigurationManager -ErrorAction SilentlyContinue | Select-Object -ExpandProperty 'LCMState'
+                                        If ($LCMState -eq 'PendingConfiguration' -Or $LCMState -eq 'PendingReboot') {
+                                            Exit 3010
+                                        } Else {
+                                            Write-Output 'DSC Config Completed'
+                                        }
+                                    }
+
+                                    Set-DscConfiguration
+                                    Start-DscConfiguration 'C:\Temp\AuditConfigInstance' -Wait -Verbose -Force
+                                    Invoke-DscStatusCheck
+
+                                    Try {
+                                        $Version = Invoke-WebRequest 'https://github.com/awslabs/kinesis-agent-windows/releases/latest' -Headers @{"Accept" = "application/json" } -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'tag_name'
+                                    } Catch [System.Exception] {
+                                        Write-Output "Failed to get latest KTAP version $_"
+                                        Exit 1
+                                    }
+
+                                    $VersionMinusV = $Version.Substring(1)
+
+                                    (New-Object -TypeName 'System.Net.WebClient').DownloadFile("https://github.com/awslabs/kinesis-agent-windows/releases/download/$Version/AWSKinesisTap.$VersionMinusV.msi", 'C:\Temp\AWSKinesisTap.msi')
+
+                                    Write-Output 'Installing KinesisTap'
+                                    $DeployArguments = @('/quiet', '/l', 'C:\Temp\ktap-install-log.txt')
+                                    $Process = Start-Process 'C:\Temp\AWSKinesisTap.msi' -ArgumentList $DeployArguments -Wait -PassThru
+
+                                    If ($Process.ExitCode -ne 0) {
+                                        Write-Output "Error installing KinesisTap -exit code $($Process.ExitCode)"
+                                        Exit 1
+                                    }
+
+                                    $KenesisAgentSettings = @{
+                                        'Sources' = @(
+                                            @{
+                                                'Id' = 'PerformanceCounter'
+                                                'SourceType' = 'WindowsPerformanceCounterSource'
+                                                'Categories' = @(
+                                                    @{
+                                                        'Category' = 'ENA Packets Shaping'
+                                                        'Instances' = 'ENA #1'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = 'Aggregate inbound BW allowance exceeded'
+                                                                'Unit' = 'Count'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Aggregate outbound BW allowance exceeded'
+                                                                'Unit' = 'Count'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Connection tracking allowance exceeded'
+                                                                'Unit' = 'Count'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Link local packet rate allowance exceeded'
+                                                                'Unit' = 'Count'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'PPS allowance exceeded'
+                                                                'Unit' = 'Count'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'LogicalDisk'
+                                                        'Instances' = 'D:'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = '% Free Space'
+                                                                'Unit' = 'Percent'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Avg. Disk Queue Length'
+                                                                'Unit' = 'Count'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'LogicalDisk'
+                                                        'Instances' = 'C:'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = '% Free Space'
+                                                                'Unit' = 'Percent'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Avg. Disk Queue Length'
+                                                                'Unit' = 'Count'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'Memory'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = '% Committed Bytes in Use'
+                                                                'Unit' = 'Percent'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Available MBytes'
+                                                                'Unit' = 'Megabytes'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Long-Term Average Standby Cache Lifetime (s)'
+                                                                'Unit' = 'Seconds'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'Network Interface'
+                                                        'Instances' = 'Amazon Elastic Network Adapter'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = 'Bytes Received/sec'
+                                                                'Unit' = 'Count/Second'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Bytes Sent/sec'
+                                                                'Unit' = 'Count/Second'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Current Bandwidth'
+                                                                'Unit' = 'Bits/Second'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'PhysicalDisk'
+                                                        'Instances' = '0 C:'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = 'Avg. Disk Queue Length'
+                                                                'Unit' = 'Count'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'PhysicalDisk'
+                                                        'Instances' = '1 D:'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = 'Avg. Disk Queue Length'
+                                                                'Unit' = 'Count'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'Processor'
+                                                        'Instances' = '*'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = '% Processor Time'
+                                                                'Unit' = 'Percent'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'Certification Authority'
+                                                        'Instances' = '*'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = 'Failed Request/sec'
+                                                                'Unit' = 'Count/Second'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Request/sec'
+                                                                'Unit' = 'Count/Second'
+                                                            },
+                                                            @{
+                                                                'Counter' = 'Request processing time (ms)'
+                                                                'Unit' = 'Milliseconds'
+                                                            }
+                                                        )
+                                                    },
+                                                    @{
+                                                        'Category' = 'Certification Authority Connections'
+                                                        'Instances' = '*'
+                                                        'Counters' = @(
+                                                            @{
+                                                                'Counter' = 'Active connections'
+                                                                'Unit' = 'Count'
+                                                            }
+                                                        )
+                                                    }
+                                                )
+                                            },
+                                            @{
+                                                'Id' = 'ApplicationLog'
+                                                'SourceType' = 'WindowsEventLogSource'
+                                                'LogName' = 'Application'
+                                            },
+                                            @{
+                                                'Id' = 'SecurityLog'
+                                                'SourceType' = 'WindowsEventLogSource'
+                                                'LogName' = 'Security'
+                                            },
+                                            @{
+                                                'Id' = 'SystemLog'
+                                                'SourceType' = 'WindowsEventLogSource'
+                                                'LogName' = 'System'
+                                            },
+                                            @{
+                                                'Id' = 'CertificateServicesClient-Lifecycle-SystemOperationalLog'
+                                                'SourceType' = 'WindowsEventLogSource'
+                                                'LogName' = 'Microsoft-Windows-CertificateServicesClient-Lifecycle-System/Operational'
+                                            }
+                                        )
+                                        'Sinks'      = @(
+                                            @{
+                                                'Namespace' = 'EC2-Domain-Member-Metrics'
+                                                'Region' = 'ReplaceMe'
+                                                'Id' = 'CloudWatchSink'
+                                                'SinkType' = 'CloudWatch'
+                                            },
+                                            @{
+                                                'Id' = 'ApplicationLog-CloudWatchLogsSink'
+                                                'SinkType' = 'CloudWatchLogs'
+                                                'BufferInterval' = '60'
+                                                'LogGroup' = '{ComputerName}-Log-Group'
+                                                'LogStream' = 'ApplicationLog-Stream'
+                                                'Region' = 'ReplaceMe'
+                                                'Format' = 'json'
+                                            },
+                                            @{
+                                                'Id' = 'SecurityLog-CloudWatchLogsSink'
+                                                'SinkType' = 'CloudWatchLogs'
+                                                'BufferInterval' = '60'
+                                                'LogGroup' = '{ComputerName}-Log-Group'
+                                                'LogStream' = 'SecurityLog-Stream'
+                                                'Region' = 'ReplaceMe'
+                                                'Format' = 'json'
+                                            },
+                                            @{
+                                                'Id' = 'SystemLog-CloudWatchLogsSink'
+                                                'SinkType' = 'CloudWatchLogs'
+                                                'BufferInterval' = '60'
+                                                'LogGroup' = '{ComputerName}-Log-Group'
+                                                'LogStream' = 'SystemLog-Stream'
+                                                'Region' = 'ReplaceMe'
+                                                'Format' = 'json'
+                                            },
+                                            @{
+                                                'Id' = 'CertificateServicesClient-Lifecycle-SystemOperationalLog-CloudWatchLogsSink'
+                                                'SinkType' = 'CloudWatchLogs'
+                                                'BufferInterval' = '60'
+                                                'LogGroup' = '{ComputerName}-Log-Group'
+                                                'LogStream' = 'CertificateServicesClient-Lifecycle-SystemOperationalLog-Stream'
+                                                'Region' = 'ReplaceMe'
+                                                'Format' = 'json'
+                                            }
+                                        )
+                                        'Pipes'      = @(
+                                            @{
+                                                'Id' = 'PerformanceCounterToCloudWatch'
+                                                'SourceRef' = 'PerformanceCounter'
+                                                'SinkRef' = 'CloudWatchSink'
+                                            },
+                                            @{
+                                                'Id' = 'ApplicationLogToCloudWatch'
+                                                'SourceRef' = 'ApplicationLog'
+                                                'SinkRef' = 'ApplicationLog-CloudWatchLogsSink'
+                                            },
+                                            @{
+                                                'Id' = 'SecurityLogToCloudWatch'
+                                                'SourceRef' = 'SecurityLog'
+                                                'SinkRef' = 'SecurityLog-CloudWatchLogsSink'
+                                            },
+                                            @{
+                                                'Id' = 'SystemLogToCloudWatch'
+                                                'SourceRef' = 'SystemLog'
+                                                'SinkRef' = 'SystemLog-CloudWatchLogsSink'
+                                            },
+                                            @{
+                                                'Id' = 'CertificateServicesClient-Lifecycle-SystemOperationalLogToCloudWatch'
+                                                'SourceRef' = 'CertificateServicesClient-Lifecycle-SystemOperationalLog'
+                                                'SinkRef' = 'CertificateServicesClient-Lifecycle-SystemOperationalLog-CloudWatchLogsSink'
+                                            }
+                                        )
+                                        'SelfUpdate' = 0
+                                    }
+
+                                    Write-Output 'Getting region'
+                                    Try {
+                                        [string]$Token = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '3600' } -Method 'PUT' -Uri 'http://169.254.169.254/latest/api/token' -UseBasicParsing -ErrorAction Stop
+                                        $Region = (Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token } -Method 'GET' -Uri 'http://169.254.169.254/latest/dynamic/instance-identity/document' -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'Region').ToUpper()
+                                    } Catch [System.Exception] {
+                                        Write-Output "Failed to get region $_"
+                                        Exit 1
+                                    }
+
+                                    $KenesisAgentSettings.Sinks | Where-Object { $_.Region -eq 'ReplaceMe' } | ForEach-Object { $_.Region = $Region }
+
+                                    Write-Output 'Exporting appsettings.json content'
+                                    Try {
+                                        $KenesisAgentSettings | ConvertTo-Json -Depth 10 -ErrorAction Stop | Out-File 'C:\Program Files\Amazon\AWSKinesisTap\appsettings.json' -Encoding 'ascii' -ErrorAction Stop
+                                    } Catch [System.Exception] {
+                                        Write-Output "Unable to export appsettings.json $_"
+                                        Exit 1
+                                    }
+
+                                    Write-Output 'Restarting AWSKinesisTap service'
+                                    Try {
+                                        Restart-Service 'AWSKinesisTap' -Force
+                                    } Catch [System.Exception] {
+                                        Write-Output "Unable to restart AWSKinesisTap $_"
+                                        Exit 1
+                                    }
+
                                     Invoke-Cleanup -VPCCIDR '{{VPCCIDR}}'
                           CloudWatchOutputConfig:
                               CloudWatchOutputEnabled: true
                               CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
-                    - name: cfnSignalEnd
-                      action: aws:branch
-                      inputs:
-                          Choices:
-                              - NextStep: signalSuccess
-                                Not:
-                                    Variable: "{{StackName}}"
-                                    StringEquals: ""
-                              - NextStep: sleepEnd
-                                Variable: "{{StackName}}"
-                                StringEquals: ""
-                    - name: signalSuccess
-                      action: aws:executeAwsApi
-                      isEnd: True
-                      inputs:
-                          Service: cloudformation
-                          Api: SignalResource
-                          LogicalResourceId: MgmtInstance
-                          StackName: "{{StackName}}"
-                          Status: SUCCESS
-                          UniqueId: "{{mgmtInstanceId.InstanceId}}"
-                    - name: sleepEnd
-                      action: aws:sleep
-                      isEnd: True
-                      inputs:
-                          Duration: PT1S
-                    - name: signalFailure
-                      action: aws:executeAwsApi
-                      inputs:
-                          Service: cloudformation
-                          Api: SignalResource
-                          LogicalResourceId: MgmtInstance
-                          StackName: "{{StackName}}"
-                          Status: FAILURE
-                          UniqueId: "{{mgmtInstanceId.InstanceId}}"
             DocumentType: Automation
             Tags:
                 - Key: StackName
-                  Value: !Ref AWS::StackName
-    MgmtInstance:
-        Type: AWS::EC2::Instance
-        CreationPolicy:
-            ResourceSignal:
-                Timeout: PT30M
-                Count: 1
-        DependsOn: ManagedAD
-        Properties:
-            BlockDeviceMappings:
-                - DeviceName: /dev/sda1
-                  Ebs:
-                      VolumeSize: 60
-                      VolumeType: gp3
-                      Encrypted: true
-                      KmsKeyId: alias/aws/ebs
-                      DeleteOnTermination: true
-                - DeviceName: /dev/xvdf
-                  Ebs:
-                      VolumeSize: 10
-                      VolumeType: gp3
-                      Encrypted: true
-                      KmsKeyId: alias/aws/ebs
-                      DeleteOnTermination: true
-            IamInstanceProfile: !Ref InstanceProfile
-            ImageId: !Ref AMI
-            InstanceType: t3.large
-            SecurityGroupIds:
-                - !Ref DomainMemberSG
-            SubnetId: !Ref VPCPublicSubnet1Subnet
-            Tags:
-                - Key: Name
-                  Value: MAD-MGMT01
-                - Key: Domain
-                  Value: !Ref MADDomainName
-                - Key: Role
-                  Value: Enterpise CA
-            UserData:
-                Fn::Base64: !Sub
-                    - |
-                        <powershell>
-                        $Params = @{
-                            AdminPassword = '${AdminPassword}'
-                            DomainDNSName = '${DomainDNSName}'
-                            DomainNetBIOSName = '${DomainNetBIOSName}'
-                            ExistingDcIP01 = '${ExistingDcIP01}'
-                            ExistingDcIP02 = '${ExistingDcIP02}'
-                            MgmtServerNetBIOSName = 'MAD-MGMT01'
-                            StackName = '${AWS::StackName}'
-                            URLSuffix = '${AWS::URLSuffix}'
-                            VPCCIDR = '${VPCCIDR}'
-                        }
-                        Start-SSMAutomationExecution -DocumentName '${MgmtInstanceSSMAuto}' -Parameter $Params
-                        </powershell>
-                    - AdminPassword: !Ref AdminPassword
-                      DomainDNSName: !Ref MADDomainName
-                      DomainNetBIOSName: !Ref MADNetBIOSName
-                      ExistingDcIP01:
-                          !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
-                      ExistingDcIP02:
-                          !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
-                      VPCCIDR: !GetAtt VPC.CidrBlock
+                  Value:
+                      Ref: AWS::StackName     
     OnPremDomainControllerSsmAuto:
         Type: AWS::SSM::Document
         Properties:
@@ -1763,8 +2753,8 @@ Resources:
                 schemaVersion: "0.3"
                 description: Deploy AD with SSM Automation
                 parameters:
-                    ADServer1NetBIOSName:
-                        description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
+                    AdminPassword:
+                        description: Password for the Admin account (Also used to create the trust)
                         type: String
                     DomainDNSName:
                         description: Fully qualified domain name (FQDN) of the forest root domain e.g. onpremises.local
@@ -1772,20 +2762,11 @@ Resources:
                     DomainNetBIOSName:
                         description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. ONPREMISES
                         type: String
-                    MadDcIP01:
-                        description: IP Address of MAD domain controller
-                        type: String
-                    MadDcIP02:
-                        description: IP Address of MAD domain controller
-                        type: String
-                    MadDirectoryID:
-                        description: Directory ID of MAD domain
-                        type: String
                     MadDNSName:
                         description: Fully qualified domain name (FQDN) of the MAD domain e.g. corp.example.com
                         type: String
-                    AdminPassword:
-                        description: Password for the Admin account (Also used to create the trust)
+                    ServerNetBIOSName:
+                        description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
                         type: String
                     StackName:
                         description: Stack Name Input for cfn resource signal
@@ -1800,7 +2781,7 @@ Resources:
                         description: CIDR Block for the VPC
                         type: String
                 mainSteps:
-                    - name: dc1InstanceId
+                    - name: InstanceId
                       action: aws:executeAwsApi
                       onFailure: step:signalFailure
                       inputs:
@@ -1809,7 +2790,7 @@ Resources:
                           Filters:
                               - Name: tag:Name
                                 Values:
-                                    - "{{ADServer1NetBIOSName}}"
+                                    - "{{ServerNetBIOSName}}"
                               - Name: tag:aws:cloudformation:stack-name
                                 Values:
                                     - "{{StackName}}"
@@ -1827,7 +2808,7 @@ Resources:
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{dc1InstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -1852,7 +2833,7 @@ Resources:
                                         @{
                                             Name = 'AuditPolicyDsc'
                                             Version = '1.4.0.0'
-                                        },                                       
+                                        },
                                         @{
                                             Name = 'SChannelDsc'
                                             Version = '1.2.2'
@@ -1930,7 +2911,7 @@ Resources:
 
                                         $Dirs = @(
                                             'C:\Temp\publickeys',
-                                            'C:\DnsLogs' 
+                                            'C:\DnsLogs'
                                         )
 
                                         Foreach ($Dir in $Dirs) {
@@ -1957,7 +2938,7 @@ Resources:
                                         } Catch [System.Exception] {
                                             Write-Output "Failed to copy self signed cert to publickeys directory $_"
                                             Exit 1
-                                        }    
+                                        }
                                     }
 
                                     Function Invoke-LcmConfig {
@@ -2053,7 +3034,7 @@ Resources:
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{dc1InstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     Function Get-EniConfig {
@@ -2071,7 +3052,7 @@ Resources:
                                         Write-Output 'Formatting IP address in format needed for IPAdress DSC resource'
                                         $IpAddress = $NetIpConfig | Select-Object -ExpandProperty 'IPv4Address' | Select-Object -ExpandProperty 'IpAddress'
                                         $Prefix = $NetIpConfig | Select-Object -ExpandProperty 'IPv4Address' | Select-Object -ExpandProperty 'PrefixLength'
-                                        $InterfaceAlias = $NetIpConfig | Select-Object -ExpandProperty 'InterfaceAlias'                                       
+                                        $InterfaceAlias = $NetIpConfig | Select-Object -ExpandProperty 'InterfaceAlias'
                                         $IpAddr = 'IP/CIDR' -replace 'IP', $IpAddress -replace 'CIDR', $Prefix
 
                                         Write-Output 'Getting MAC address'
@@ -2108,8 +3089,6 @@ Resources:
                                             [Parameter(Mandatory = $true)][string]$InstanceNetBIOSName,
                                             [Parameter(Mandatory = $true)][PSCredential]$LaCredentials,
                                             [Parameter(Mandatory = $true)][string]$MacAddress,
-                                            [Parameter(Mandatory = $true)][string]$MadDcIP01,
-                                            [Parameter(Mandatory = $true)][string]$MadDcIP02,
                                             [Parameter(Mandatory = $true)][string]$MadDNSName,
                                             [Parameter(Mandatory = $true)][PSCredential]$RestoreModeCredentials,
                                             [Parameter(Mandatory = $true)][string]$SiteName,
@@ -2221,7 +3200,7 @@ Resources:
                                                     DependsOn = '[IPAddress]SetIP'
                                                 }
                                                 DnsServerAddress DnsServerAddress {
-                                                    Address = $DnsInstanceIP, '127.0.0.1', '169.254.169.253'
+                                                    Address = $DnsInstanceIP, '127.0.0.1', $VPCDNS
                                                     InterfaceAlias = 'Primary'
                                                     AddressFamily = 'IPv4'
                                                     DependsOn = '[DefaultGatewayAddress]SetDefaultGateway'
@@ -2383,7 +3362,7 @@ Resources:
                                                 }
                                                 DnsServerConditionalForwarder MADForwarder {
                                                     Name = $MadDNSName 
-                                                    MasterServers = @($MadDcIP01, $MadDcIP02)
+                                                    MasterServers = @($VPCDNS)
                                                     ReplicationScope = 'Forest'
                                                     Ensure = 'Present'
                                                     DependsOn = '[ADServicePrincipalName]WSMAN-FQDN'
@@ -2459,38 +3438,22 @@ Resources:
                                     $DaCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Administrator', $UserPassword)
                                     $RestoreModeCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('Administrator', $UserPassword)
                                     $EniConfig = Get-EniConfig
-                                    Set-DscConfiguration -AltAdminCredentials $AltAdminCredentials -AltAdminUserName 'Admin' -DaCredentials $DaCredentials -DnsInstanceIP $EniConfig.DnsIpAddress -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ADServer1NetBIOSName}}' -LaCredentials $RestoreModeCredentials -MacAddress $EniConfig.MacAddress -MadDcIP01 '{{MadDcIP01}}' -MadDcIP02 '{{MadDcIP02}}' -MadDNSName '{{MadDNSName}}' -RestoreModeCredentials $RestoreModeCredentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
+                                    Set-DscConfiguration -AltAdminCredentials $AltAdminCredentials -AltAdminUserName 'Admin' -DaCredentials $DaCredentials -DnsInstanceIP $EniConfig.DnsIpAddress -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $RestoreModeCredentials -MacAddress $EniConfig.MacAddress -MadDNSName '{{MadDNSName}}' -RestoreModeCredentials $RestoreModeCredentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
                                     Start-DscConfiguration 'C:\Temp\ConfigInstance' -Wait -Verbose -Force
                                     Invoke-DscStatusCheck
                           CloudWatchOutputConfig:
                               CloudWatchOutputEnabled: true
                               CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
-                      nextStep: trustConfig
-                    - name: trustConfig
+                      nextStep: additionalConfig
+                    - name: additionalConfig
                       action: aws:runCommand
                       onFailure: step:signalFailure
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{dc1InstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
-                                    Function Get-EniConfig {
-                                        Write-Output 'Getting network configuration'
-                                        Try {
-                                            $IpAddress = Get-NetIPConfiguration -ErrorAction Stop | Select-Object -ExpandProperty 'IPv4Address' | Select-Object -ExpandProperty 'IpAddress'
-                                        } Catch [System.Exception] {
-                                            Write-Output "Failed to get network configuration $_"
-                                            Exit 1
-                                        }
-
-                                        $Output = [PSCustomObject][Ordered]@{
-                                            'DnsIpAddress'   = $IpAddress
-                                        }
-
-                                        Return $Output
-                                    }
-
                                     Function Invoke-TrustAction {
                                         [CmdletBinding()]
                                         Param(
@@ -2514,7 +3477,7 @@ Resources:
                                             [Parameter(Mandatory = $true)][Security.Principal.SecurityIdentifier]$IdentityReference,
                                             [Parameter(Mandatory = $true)][System.DirectoryServices.ActiveDirectoryRights]$ActiveDirectoryRights,
                                             [Parameter(Mandatory = $true)][System.Security.AccessControl.AccessControlType]$AccessControlType,
-                                            [Parameter(Mandatory = $false)][Guid]$ObjectGuid,        
+                                            [Parameter(Mandatory = $false)][Guid]$ObjectGuid,
                                             [Parameter(Mandatory = $false)][System.DirectoryServices.ActiveDirectorySecurityInheritance]$ActiveDirectorySecurityInheritance,
                                             [Parameter(Mandatory = $false)][Guid]$InheritedObjectGuid
                                         )
@@ -2591,7 +3554,7 @@ Resources:
                                         Write-Output "Failed to create FSxServiceAccount $_"
                                         Exit 1
                                     }
-                                    
+
                                     Try {
                                         New-ADGroup -DisplayName 'FSxAdmins' -GroupCategory 'Security' -GroupScope 'DomainLocal' -Name 'FSxAdmins' -Path "OU=FSx,$BaseDn" -SamAccountName 'FSxAdmins'
                                     } Catch [System.Exception] {
@@ -2685,43 +3648,17 @@ Resources:
                                     Switch ($TrustDirection) {
                                         'Two-Way' {
                                             $TrustDirOnprem = 'Bidirectional'
-                                            $TrustDirMAD = 'Two-Way'
                                         }
                                         'One-way' {
                                             $TrustDirOnprem = 'Inbound'
-                                            $TrustDirMAD = 'OneWayOutgoing'
                                         }
                                         Default { Throw 'InvalidArgument: Invalid value is passed for parameter TrustDirection' }
                                     }
 
                                     $TrustPassword = '{{AdminPassword}}'
 
-                                    $EniConfig = Get-EniConfig
                                     Write-Output 'Creating Onprem side of trust.'
                                     Invoke-TrustAction -RemoteFQDN '{{MadDNSName}}' -TrustPassword $TrustPassword $TrustDirOnprem
-
-                                    $CidrRange = @{ IpProtocol = "-1"; IpRanges = '0.0.0.0/0' }
-                                    
-                                    Write-Output 'Modifying the AWS Managed Microsoft Active Directory Security Group.'
-                                    Try {
-                                        $SecurityGroupId = Get-EC2SecurityGroup -Filter @{ Name = 'group-name'; Values = "{{MadDirectoryID}}_controllers" } -ErrorAction Stop | Select-Object -Property 'GroupId' -ExpandProperty 'GroupId'
-                                        $Null = Grant-EC2SecurityGroupEgress -GroupId $SecurityGroupId -IpPermission $CidrRange -Region $Region -ErrorAction Stop
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to get or modify the AWS Managed Microsoft Active Directory Security Group. $_"
-                                        Exit 1
-                                    }
-
-                                    $TrustTypeForest = New-Object -TypeName 'Amazon.DirectoryService.TrustType' -ArgumentList 'Forest'
-                                    $TrustDir = New-Object -TypeName 'Amazon.DirectoryService.TrustDirection' -ArgumentList $TrustDirMAD
-                                    $SelectiveAuthDis = New-Object -TypeName 'Amazon.DirectoryService.SelectiveAuth' -ArgumentList 'Disabled'
-
-                                    Write-Output 'Creating trust between MAD and Onprem.'
-                                    Try {
-                                        $Trust = New-DSTrust -DirectoryId '{{MadDirectoryID}}' -ConditionalForwarderIpAddr $EniConfig.DnsIpAddress -RemoteDomainName '{{DomainDNSName}}' -SelectiveAuth $SelectiveAuthDis -TrustDirection $TrustDir -TrustType $TrustTypeForest -TrustPassword $TrustPassword
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to create trust between MAD and Onprem. $_"
-                                        Exit 1
-                                    }
                           CloudWatchOutputConfig:
                               CloudWatchOutputEnabled: true
                               CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
@@ -2732,8 +3669,8 @@ Resources:
                       inputs:
                           DocumentName: !Ref OnPremDomainControllerAuditPolSsmAuto
                           RuntimeParameters:
-                            ADServer1NetBIOSName:
-                                - "{{ADServer1NetBIOSName}}"
+                            ServerNetBIOSName:
+                                - "{{ServerNetBIOSName}}"
                             StackName:
                                 - "{{StackName}}"
                             VPCCIDR:
@@ -2758,7 +3695,7 @@ Resources:
                           LogicalResourceId: OnPremDomainController
                           StackName: "{{StackName}}"
                           Status: SUCCESS
-                          UniqueId: "{{dc1InstanceId.InstanceId}}"
+                          UniqueId: "{{InstanceId.InstanceId}}"
                     - name: sleepEnd
                       action: aws:sleep
                       isEnd: true
@@ -2772,7 +3709,7 @@ Resources:
                           LogicalResourceId: OnPremDomainController
                           StackName: "{{StackName}}"
                           Status: FAILURE
-                          UniqueId: "{{dc1InstanceId.InstanceId}}"
+                          UniqueId: "{{InstanceId.InstanceId}}"
             DocumentType: Automation
             Tags:
                 - Key: StackName
@@ -2783,9 +3720,9 @@ Resources:
         Properties:
             Content:
                 schemaVersion: "0.3"
-                description: Deploy AD with SSM Automation
+                description: Configure Kinesis Agent for Windows, Windows Auditing Policy, and deployment cleanup using SSM Automation
                 parameters:
-                    ADServer1NetBIOSName:
+                    ServerNetBIOSName:
                         description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
                         type: String
                     StackName:
@@ -2793,9 +3730,9 @@ Resources:
                         type: String
                     VPCCIDR:
                         description: CIDR Block for the VPC
-                        type: String                        
+                        type: String
                 mainSteps:
-                    - name: dc1InstanceId
+                    - name: InstanceId
                       action: aws:executeAwsApi
                       inputs:
                           Service: ec2
@@ -2803,7 +3740,7 @@ Resources:
                           Filters:
                               - Name: tag:Name
                                 Values:
-                                    - "{{ADServer1NetBIOSName}}"
+                                    - "{{ServerNetBIOSName}}"
                               - Name: tag:aws:cloudformation:stack-name
                                 Values:
                                     - "{{StackName}}"
@@ -2820,7 +3757,7 @@ Resources:
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{dc1InstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     Function Invoke-Cleanup {
@@ -3561,7 +4498,7 @@ Resources:
                                                                 'Unit' = 'Count'
                                                             }
                                                         )
-                                                    },                                                    
+                                                    },
                                                     @{
                                                         'Category' = 'Memory'
                                                         'Counters' = @(
@@ -3616,7 +4553,7 @@ Resources:
                                                                 'Unit' = 'Count'
                                                             }
                                                         )
-                                                    },                                                    
+                                                    },
                                                     @{
                                                         'Category' = 'Processor'
                                                         'Instances' = '*'
@@ -3655,7 +4592,7 @@ Resources:
                                                             @{
                                                                 'Counter' = 'Database Cache % Hit'
                                                                 'Unit' = 'Percent'
-                                                            },                                                        
+                                                            },
                                                             @{
                                                                 'Counter' = 'Database Cache Size (MB)'
                                                                 'Unit' = 'Megabytes'
@@ -3833,7 +4770,7 @@ Resources:
                                                 'Id' = 'KerberosOperationalLog'
                                                 'SourceType' = 'WindowsEventLogSource'
                                                 'LogName' = 'Microsoft-Windows-Kerberos/Operational'
-                                            },                                            
+                                            },
                                             @{
                                                 'Id' = 'Kerberos-Key-Distribution-CenterOperationalLog'
                                                 'SourceType' = 'WindowsEventLogSource'
@@ -3908,7 +4845,7 @@ Resources:
                                                 'LogStream' = 'DirectoryServiceLog-Stream'
                                                 'Region' = 'ReplaceMe'
                                                 'Format' = 'json'
-                                            },                                            
+                                            },
                                             @{
                                                 'Id' = 'DNSServerLog-CloudWatchLogsSink'
                                                 'SinkType' = 'CloudWatchLogs'
@@ -4093,77 +5030,12 @@ Resources:
                 - Key: StackName
                   Value:
                       Ref: AWS::StackName
-    OnPremDomainController:
-        Type: AWS::EC2::Instance
-        DependsOn: ManagedAD
-        CreationPolicy:
-            ResourceSignal:
-                Count: 1
-                Timeout: PT60M
-        Properties:
-            BlockDeviceMappings:
-                - DeviceName: /dev/sda1
-                  Ebs:
-                      DeleteOnTermination: true
-                      Encrypted: true
-                      KmsKeyId: alias/aws/ebs
-                      VolumeSize: 60
-                      VolumeType: gp3
-                - DeviceName: /dev/xvdf
-                  Ebs:
-                      DeleteOnTermination: true
-                      Encrypted: true
-                      KmsKeyId: alias/aws/ebs
-                      VolumeSize: 10
-                      VolumeType: gp3
-            IamInstanceProfile: !Ref InstanceProfile
-            ImageId: !Ref AMI
-            InstanceType: t3.large
-            SecurityGroupIds:
-                - Ref: OnPremDomainControllerSG
-            SubnetId: !Ref VPCPublicSubnet1Subnet
-            Tags:
-                - Key: Domain
-                  Value: !Ref OnpremDomainName
-                - Key: Name
-                  Value: ONPREM-DC01
-                - Key: Role
-                  Value: Domain Controller                 
-            UserData:
-                Fn::Base64: !Sub
-                    - |
-                        <powershell>
-                        $Params = @{
-                            AdminPassword = '${AdminPassword}'
-                            ADServer1NetBIOSName = 'ONPREM-DC01'
-                            DomainDNSName = '${DomainDNSName}'
-                            DomainNetBIOSName = '${DomainNetBIOSName}'
-                            MadDcIP01 = '${MadDcIP01}'
-                            MadDcIP02 = '${MadDcIP02}'
-                            MadDirectoryID = '${MadDirectoryID}'
-                            MadDNSName = '${MadDNSName}'
-                            StackName = '${AWS::StackName}'
-                            TrustDirection = '${TrustDirection}'
-                            URLSuffix = '${AWS::URLSuffix}'
-                            VPCCIDR = '${VPCCIDR}'
-                        }
-                        Start-SSMAutomationExecution -DocumentName '${OnPremDomainControllerSsmAuto}' -Parameter $Params
-                        </powershell>
-                    - AdminPassword: !Ref AdminPassword
-                      DomainDNSName: !Ref OnpremDomainName
-                      DomainNetBIOSName: !Ref OnpremNetBIOSName
-                      MadDcIP01: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
-                      MadDcIP02: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
-                      MadDirectoryID: !Ref ManagedAD
-                      MadDNSName: !Ref MADDomainName
-                      TrustDirection: !Ref TrustDirection
-                      VPCCIDR: !GetAtt VPC.CidrBlock
     OnpremPkiInstanceSSMAuto:
         Type: AWS::SSM::Document
         Properties:
             Content:
                 schemaVersion: "0.3"
-                description: Deploy AD with SSM Automation
+                description: Deploy Enterpise CA using SSM Automation
                 parameters:
                     AdminPassword:
                         description: Password for the Admin account (Also used to create the trust)
@@ -4173,9 +5045,6 @@ Resources:
                         type: String
                     DomainNetBIOSName:
                         description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. EXAMPLE
-                        type: String
-                    ExistingDcIP01:
-                        description: IP of DNS server that can resolve domain (Must be accessible)
                         type: String
                     ServerNetBIOSName:
                         description: NetBIOS name of the Management Instance server (up to 15 characters)
@@ -4190,7 +5059,7 @@ Resources:
                         description: CIDR Block for the VPC
                         type: String
                 mainSteps:
-                    - name: pkiInstanceId
+                    - name: InstanceId
                       action: aws:executeAwsApi
                       onFailure: step:signalFailure
                       inputs:
@@ -4210,10 +5079,11 @@ Resources:
                       nextStep: intializeInstance
                     - name: intializeInstance
                       action: aws:runCommand
+                      onFailure: step:signalFailure
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{pkiInstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -4234,6 +5104,10 @@ Resources:
                                         @{
                                             Name = 'DnsServerDsc'
                                             Version = '3.0.0'
+                                        },
+                                        @{
+                                            Name = 'AuditPolicyDsc'
+                                            Version = '1.4.0.0'
                                         }
                                     )
 
@@ -4420,10 +5294,11 @@ Resources:
                       nextStep: configureInstance
                     - name: configureInstance
                       action: aws:runCommand
+                      onFailure: step:signalFailure
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{pkiInstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     Function Get-EniConfig {
@@ -4466,7 +5341,6 @@ Resources:
                                             [Parameter(Mandatory = $true)][PSCredential]$DaCredentials,
                                             [Parameter(Mandatory = $true)][string]$DomainDNSName,
                                             [Parameter(Mandatory = $true)][string]$DomainNetBIOSName,
-                                            [Parameter(Mandatory = $false)][string]$ExistingDcIP01,
                                             [Parameter(Mandatory = $true)][string]$GatewayAddress,
                                             [Parameter(Mandatory = $true)][string]$InstanceIP,
                                             [Parameter(Mandatory = $true)][string]$InstanceNetBIOSName,
@@ -4513,24 +5387,24 @@ Resources:
                                                     NetworkAdapterName = 'Primary'
                                                     RegistryKeyword = '*JumboPacket'
                                                     RegistryValue = 9015
-                                                    DependsOn = '[NetAdapterName]RenameNetAdapterPrimary'                                                    
+                                                    DependsOn = '[NetAdapterName]RenameNetAdapterPrimary'
                                                 }
                                                 NetAdapterAdvancedProperty ReceiveBuffers {
                                                     NetworkAdapterName = 'Primary'
                                                     RegistryKeyword = '*ReceiveBuffers'
                                                     RegistryValue = 8192
-                                                    DependsOn = '[NetAdapterName]RenameNetAdapterPrimary'                                                    
+                                                    DependsOn = '[NetAdapterName]RenameNetAdapterPrimary'
                                                 }
                                                 NetAdapterAdvancedProperty TransmitBuffers {
                                                     NetworkAdapterName = 'Primary'
                                                     RegistryKeyword = '*TransmitBuffers'
                                                     RegistryValue = 1024
-                                                    DependsOn = '[NetAdapterName]RenameNetAdapterPrimary'                                                    
+                                                    DependsOn = '[NetAdapterName]RenameNetAdapterPrimary'
                                                 }
                                                 NetBios DisableNetBios {
                                                     InterfaceAlias = 'Primary'
                                                     Setting = 'Disable'
-                                                    DependsOn = '[NetAdapterName]RenameNetAdapterPrimary'                                                    
+                                                    DependsOn = '[NetAdapterName]RenameNetAdapterPrimary'
                                                 }
                                                 NetIPInterface DisableDhcp {
                                                     Dhcp = 'Disabled'
@@ -4551,7 +5425,7 @@ Resources:
                                                     DependsOn = '[IPAddress]SetIP'
                                                 }
                                                 DnsServerAddress DnsServerAddress {
-                                                    Address = $ExistingDcIP01, '169.254.169.253'
+                                                    Address = '169.254.169.253'
                                                     InterfaceAlias = 'Primary'
                                                     AddressFamily = 'IPv4'
                                                     DependsOn = '[DefaultGatewayAddress]SetDefaultGateway'
@@ -4607,19 +5481,20 @@ Resources:
                                     $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
                                     $AltAdminCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Administrator', $UserPassword)
                                     $EniConfig = Get-EniConfig
-                                    Set-DscConfiguration -DaCredentials $AltAdminCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -ExistingDcIP01 '{{ExistingDcIP01}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
+                                    Set-DscConfiguration -DaCredentials $AltAdminCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
                                     Start-DscConfiguration 'C:\Temp\ConfigInstance' -Wait -Verbose -Force
                                     Invoke-DscStatusCheck
                           CloudWatchOutputConfig:
                               CloudWatchOutputEnabled: true
                               CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
-                      nextStep: postConfig
-                    - name: postConfig
+                      nextStep: caConfig
+                    - name: caConfig
                       action: aws:runCommand
+                      onFailure: step:signalFailure
                       inputs:
                           DocumentName: AWS-RunPowerShellScript
                           InstanceIds:
-                              - "{{pkiInstanceId.InstanceId}}"
+                              - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
                                     Function Invoke-EnterpriseCaConfig {
@@ -5298,56 +6173,24 @@ Resources:
                                         }
                                     }
 
-                                    Function Invoke-Cleanup {
-                                        [CmdletBinding()]
-                                        Param (
-                                            [Parameter(Mandatory = $true)][String]$VPCCIDR
-                                        )
-
-                                        Write-Output 'Setting Windows Firewall WinRM Public rule to allow VPC CIDR traffic'
-                                        Try {
-                                            Set-NetFirewallRule -Name 'WINRM-HTTP-In-TCP-PUBLIC' -RemoteAddress $VPCCIDR
-                                        } Catch [System.Exception] {
-                                            Write-Output "Failed allow WinRM Traffic from VPC CIDR $_"
-                                        }
-
-                                        Write-Output 'Removing DSC Configuration'
-                                        Try {
-                                            Remove-DscConfigurationDocument -Stage 'Current' -ErrorAction Stop
-                                        } Catch [System.Exception] {
-                                            Write-Output "Failed build DSC Configuration $_"
-                                        }
-
-                                        Write-Output 'Re-enabling Windows Firewall'
-                                        Try {
-                                            Get-NetFirewallProfile -ErrorAction Stop | Set-NetFirewallProfile -Enabled 'True' -ErrorAction Stop
-                                        } Catch [System.Exception] {
-                                            Write-Output "Failed re-enable firewall $_"
-                                        }
-
-                                        Write-Output 'Removing build files'
-                                        Try {
-                                            Remove-Item -Path 'C:\Temp' -Recurse -Force -ErrorAction Stop
-                                        } Catch [System.Exception] {
-                                            Write-Output "Failed remove build files $_"
-                                        }
-
-                                        Write-Output 'Removing self signed cert'
-                                        Try {
-                                            $SelfSignedThumb = Get-ChildItem -Path 'cert:\LocalMachine\My\' -ErrorAction Stop | Where-Object { $_.Subject -eq 'CN=DscEncryptCert' } | Select-Object -ExpandProperty 'Thumbprint'
-                                            Remove-Item -Path "cert:\LocalMachine\My\$SelfSignedThumb" -DeleteKey -ErrorAction Stop
-                                        } Catch [System.Exception] {
-                                            Write-Output "Failed remove self signed cert $_"
-                                        }
-                                    }
-
                                     $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
                                     $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
                                     Invoke-EnterpriseCaConfig -Credentials $Credentials -EntCaCommonName '{{ServerNetBIOSName}}' -EntCaHashAlgorithm 'SHA256' -EntCaKeyLength '2048' -EntCaValidityPeriodUnits '5' -VPCCIDR '{{VPCCIDR}}'
-                                    Invoke-Cleanup -VPCCIDR '{{VPCCIDR}}'
                           CloudWatchOutputConfig:
                               CloudWatchOutputEnabled: true
                               CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
+                    - name: runPkiInstanceAuditPolSsmAuto
+                      action: aws:executeAutomation
+                      onFailure: step:signalFailure
+                      inputs:
+                          DocumentName: !Ref PkiInstanceAuditPolSsmAuto
+                          RuntimeParameters:
+                            ServerNetBIOSName:
+                                - "{{ServerNetBIOSName}}"
+                            StackName:
+                                - "{{StackName}}"
+                            VPCCIDR:
+                                - "{{VPCCIDR}}"
                     - name: cfnSignalEnd
                       action: aws:branch
                       inputs:
@@ -5368,7 +6211,7 @@ Resources:
                           LogicalResourceId: OnpremPkiInstance
                           StackName: "{{StackName}}"
                           Status: SUCCESS
-                          UniqueId: "{{pkiInstanceId.InstanceId}}"
+                          UniqueId: "{{InstanceId.InstanceId}}"
                     - name: sleepEnd
                       action: aws:sleep
                       isEnd: True
@@ -5382,11 +6225,139 @@ Resources:
                           LogicalResourceId: OnpremPkiInstance
                           StackName: "{{StackName}}"
                           Status: FAILURE
-                          UniqueId: "{{pkiInstanceId.InstanceId}}"
+                          UniqueId: "{{InstanceId.InstanceId}}"
             DocumentType: Automation
             Tags:
                 - Key: StackName
                   Value: !Ref AWS::StackName
+    ManagedAD:
+        Type: AWS::DirectoryService::MicrosoftAD
+        Properties:
+            CreateAlias: false
+            Edition: Enterprise
+            EnableSso: false
+            Name: !Ref MADDomainName
+            Password: !Ref AdminPassword
+            ShortName: !Ref MADNetBIOSName
+            VpcSettings:
+                SubnetIds:
+                    - !Ref VPCPublicSubnet1Subnet
+                    - !Ref VPCPublicSubnet2Subnet
+                VpcId: !Ref VPC
+    RR53RuleMAD:
+        Type: AWS::Route53Resolver::ResolverRule
+        DependsOn: ManagedAD
+        Properties:
+            Name: MAD-Rule
+            DomainName: !Ref MADDomainName
+            ResolverEndpointId: !Ref R53RROutbound
+            RuleType: FORWARD
+            TargetIps:
+                - Ip: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
+                - Ip: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
+    RR53RRAssocMad:
+        Type: AWS::Route53Resolver::ResolverRuleAssociation
+        Properties:
+            ResolverRuleId: !Ref RR53RuleMAD
+            VPCId: !Ref VPC
+    RdsDB:
+        Type: AWS::RDS::DBInstance
+        DependsOn: ManagedAD
+        Properties:
+            AllocatedStorage: 20
+            AvailabilityZone: !Select
+                - 0
+                - Fn::GetAZs: !Ref AWS::Region
+            DBInstanceClass: db.t3.xlarge
+            DBInstanceIdentifier: DemoRDS
+            DBSubnetGroupName: !Ref RdsDBSubnetGroup
+            Domain: !Ref ManagedAD
+            DomainIAMRoleName: !Ref RDSRole
+            Engine: sqlserver-se
+            EngineVersion: 15.00.4073.23.v1
+            LicenseModel: license-included
+            MasterUsername: admin
+            MasterUserPassword: !Ref RDSPassword
+            StorageType: gp2
+            VPCSecurityGroups:
+                - !Ref DomainMemberSG
+    FSxMAD:
+        Type: AWS::FSx::FileSystem
+        DependsOn: ManagedAD
+        Properties: 
+            FileSystemType: WINDOWS
+            SecurityGroupIds: 
+                - !Ref DomainMemberSG
+            StorageCapacity: 32
+            StorageType: SSD
+            SubnetIds: 
+                - !Ref VPCPublicSubnet1Subnet
+            WindowsConfiguration: 
+                ActiveDirectoryId: !Ref ManagedAD
+                Aliases: 
+                    - !Join [ '.', [ DemoFSx, !Ref MADDomainName ] ]
+                AutomaticBackupRetentionDays: 0
+                DeploymentType: SINGLE_AZ_2
+                ThroughputCapacity: 16
+    OnPremDomainController:
+        Type: AWS::EC2::Instance
+        DependsOn: ManagedAD
+        CreationPolicy:
+            ResourceSignal:
+                Count: 1
+                Timeout: PT60M
+        Properties:
+            BlockDeviceMappings:
+                - DeviceName: /dev/sda1
+                  Ebs:
+                      DeleteOnTermination: true
+                      Encrypted: true
+                      KmsKeyId: alias/aws/ebs
+                      VolumeSize: 60
+                      VolumeType: gp3
+                - DeviceName: /dev/xvdf
+                  Ebs:
+                      DeleteOnTermination: true
+                      Encrypted: true
+                      KmsKeyId: alias/aws/ebs
+                      VolumeSize: 10
+                      VolumeType: gp3
+            IamInstanceProfile: !Ref InstanceProfile
+            ImageId: !Ref AMI
+            InstanceType: t3.large
+            SecurityGroupIds:
+                - Ref: OnPremDomainControllerSG
+            SubnetId: !Ref VPCPublicSubnet1Subnet
+            Tags:
+                - Key: Domain
+                  Value: !Ref OnpremDomainName
+                - Key: Name
+                  Value: ONPREM-DC01
+                - Key: Role
+                  Value: Domain Controller
+            UserData:
+                Fn::Base64: !Sub
+                    - |
+                        <powershell>
+                        $Params = @{
+                            AdminPassword = '${AdminPassword}'
+                            ServerNetBIOSName = 'ONPREM-DC01'
+                            DomainDNSName = '${DomainDNSName}'
+                            DomainNetBIOSName = '${DomainNetBIOSName}'
+                            MadDNSName = '${MadDNSName}'
+                            StackName = '${AWS::StackName}'
+                            TrustDirection = '${TrustDirection}'
+                            URLSuffix = '${AWS::URLSuffix}'
+                            VPCCIDR = '${VPCCIDR}'
+                        }
+                        Start-SSMAutomationExecution -DocumentName '${OnPremDomainControllerSsmAuto}' -Parameter $Params
+                        </powershell>
+                    - AdminPassword: !Ref AdminPassword
+                      DomainDNSName: !Ref OnpremDomainName
+                      DomainNetBIOSName: !Ref OnpremNetBIOSName
+                      MadDNSName: !Ref MADDomainName
+                      TrustDirection: !Ref TrustDirection
+                      VPCCIDR: !GetAtt VPC.CidrBlock
     OnpremPkiInstance:
         Type: AWS::EC2::Instance
         CreationPolicy:
@@ -5431,7 +6402,6 @@ Resources:
                             AdminPassword = '${AdminPassword}'
                             DomainDNSName = '${DomainDNSName}'
                             DomainNetBIOSName = '${DomainNetBIOSName}'
-                            ExistingDcIP01 = '${ExistingDcIP01}'
                             ServerNetBIOSName = 'ONPREM-PKI01'
                             StackName = '${AWS::StackName}'
                             URLSuffix = '${AWS::URLSuffix}'
@@ -5442,39 +6412,10 @@ Resources:
                     - AdminPassword: !Ref AdminPassword
                       DomainDNSName: !Ref OnpremDomainName
                       DomainNetBIOSName: !Ref OnpremNetBIOSName
-                      ExistingDcIP01: !GetAtt OnPremDomainController.PrivateIp
                       VPCCIDR: !GetAtt VPC.CidrBlock
-    RdsDBSubnetGroup:
-        Type: AWS::RDS::DBSubnetGroup
-        Properties:
-            DBSubnetGroupDescription: Demo-DBSubnetGroup
-            SubnetIds:
-                - !Ref VPCPublicSubnet1Subnet
-                - !Ref VPCPublicSubnet2Subnet
-    RdsDB:
-        Type: AWS::RDS::DBInstance
-        DependsOn: ManagedAD
-        Properties:
-            AllocatedStorage: 20
-            AvailabilityZone: !Select
-                - 0
-                - Fn::GetAZs: !Ref AWS::Region
-            DBInstanceClass: db.t3.xlarge
-            DBInstanceIdentifier: DemoRDS
-            DBSubnetGroupName: !Ref RdsDBSubnetGroup
-            Domain: !Ref ManagedAD
-            DomainIAMRoleName: !Ref RDSRole
-            Engine: sqlserver-se
-            EngineVersion: 15.00.4073.23.v1
-            LicenseModel: license-included
-            MasterUsername: admin
-            MasterUserPassword: !Ref RDSPassword
-            StorageType: gp2
-            VPCSecurityGroups:
-                - !Ref DomainMemberSG
-    FSxMAD:
+    FSxOnprem:
         Type: AWS::FSx::FileSystem
-        DependsOn: ManagedAD
+        DependsOn: OnPremDomainController
         Properties: 
             FileSystemType: WINDOWS
             SecurityGroupIds: 
@@ -5484,12 +6425,95 @@ Resources:
             SubnetIds: 
                 - !Ref VPCPublicSubnet1Subnet
             WindowsConfiguration: 
-                ActiveDirectoryId: !Ref ManagedAD
                 Aliases: 
-                    - !Join [ '.', [ DemoFSx, !Ref MADDomainName] ]
+                    - !Join [ '.', [ DemoFSx, !Ref OnpremDomainName ] ]
                 AutomaticBackupRetentionDays: 0
                 DeploymentType: SINGLE_AZ_2
+                SelfManagedActiveDirectoryConfiguration:
+                  DnsIps: 
+                    - !GetAtt OnPremDomainController.PrivateIp
+                  DomainName: !Ref OnpremDomainName
+                  FileSystemAdministratorsGroup: FSxAdmins
+                  OrganizationalUnitDistinguishedName: 'OU=FSx,DC=onpremises,DC=local'
+                  Password: !Ref AdminPassword
+                  UserName: FSxServiceAccount
                 ThroughputCapacity: 16
+    RR53RuleOnprem:
+        Type: AWS::Route53Resolver::ResolverRule
+        DependsOn: OnPremDomainController
+        Properties:
+            Name: Onprem-Rule
+            DomainName: !Ref OnpremDomainName
+            ResolverEndpointId: !Ref R53RROutbound
+            RuleType: FORWARD
+            TargetIps:
+                - Ip: !GetAtt OnPremDomainController.PrivateIp
+    RR53RRAssocOnprem:
+        Type: AWS::Route53Resolver::ResolverRuleAssociation
+        Properties:
+            ResolverRuleId: !Ref RR53RuleOnprem
+            VPCId: !Ref VPC
+    MgmtInstance:
+        Type: AWS::EC2::Instance
+        CreationPolicy:
+            ResourceSignal:
+                Timeout: PT30M
+                Count: 1
+        DependsOn: RR53RRAssocOnprem
+        Properties:
+            BlockDeviceMappings:
+                - DeviceName: /dev/sda1
+                  Ebs:
+                      VolumeSize: 60
+                      VolumeType: gp3
+                      Encrypted: true
+                      KmsKeyId: alias/aws/ebs
+                      DeleteOnTermination: true
+                - DeviceName: /dev/xvdf
+                  Ebs:
+                      VolumeSize: 10
+                      VolumeType: gp3
+                      Encrypted: true
+                      KmsKeyId: alias/aws/ebs
+                      DeleteOnTermination: true
+            IamInstanceProfile: !Ref InstanceProfile
+            ImageId: !Ref AMI
+            InstanceType: t3.large
+            SecurityGroupIds:
+                - !Ref DomainMemberSG
+            SubnetId: !Ref VPCPublicSubnet1Subnet
+            Tags:
+                - Key: Name
+                  Value: MAD-MGMT01
+                - Key: Domain
+                  Value: !Ref MADDomainName
+                - Key: Role
+                  Value: Enterpise CA
+            UserData:
+                Fn::Base64: !Sub
+                    - |
+                        <powershell>
+                        $Params = @{
+                            AdminPassword = '${AdminPassword}'
+                            DomainDNSName = '${DomainDNSName}'
+                            DomainNetBIOSName = '${DomainNetBIOSName}'
+                            ServerNetBIOSName = 'MAD-MGMT01'
+                            MadDirectoryID = '${MadDirectoryID}'
+                            OnpremDomainDNSName = '${OnpremDomainDNSName}'
+                            StackName = '${AWS::StackName}'
+                            TrustDirection = '${TrustDirection}'
+                            URLSuffix = '${AWS::URLSuffix}'
+                            VPCCIDR = '${VPCCIDR}'
+                        }
+                        Start-SSMAutomationExecution -DocumentName '${MgmtInstanceSSMAuto}' -Parameter $Params
+                        </powershell>
+                    - AdminPassword: !Ref AdminPassword
+                      DomainDNSName: !Ref MADDomainName
+                      DomainNetBIOSName: !Ref MADNetBIOSName
+                      MadDirectoryID: !Ref ManagedAD
+                      OnpremDomainDNSName : !Ref OnpremDomainName
+                      TrustDirection: !Ref TrustDirection
+                      VPCCIDR: !GetAtt VPC.CidrBlock
 Outputs:
     MADManagementInstanceID:
         Description: MAD Management Instance ID
@@ -5512,7 +6536,7 @@ Outputs:
     OnpremDomainControllerInstancePrivateIP:
         Description: Onprem Domain Controller Instance Private IP
         Value: !GetAtt OnPremDomainController.PrivateIp
-    OnpremPKIInstanceID:
+    OnpremInstanceID:
         Description: Onprem PKI Instance ID
         Value: !Ref OnpremPkiInstance
     OnpremPKIInstancePrivateIP:
@@ -5524,12 +6548,18 @@ Outputs:
     DomainMemberSGID:
         Description: Domain Members Security Group ID
         Value: !Ref DomainMemberSG
-    FSxFileSystemId:
+    MadFSxFileSystemId:
         Description: FileSystem ID of FSx
         Value: !Ref FSxMAD
-    FSxFileSystemDNSName:
+    MadFSxFileSystemDNSName:
         Description: FSx DNS Name
         Value: !GetAtt FSxMAD.DNSName
+    OnpremFSxFileSystemId:
+        Description: FileSystem ID of FSx
+        Value: !Ref FSxOnprem
+    OnpremFSxFileSystemDNSName:
+        Description: FSx DNS Name
+        Value: !GetAtt FSxOnprem.DNSName
     RDSInstanceName:
         Description: Instance Name of RDS Instance
         Value: !Ref RdsDB
