@@ -1,4 +1,20 @@
 AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  This template creates the following items:
+    1.	Brand new VPC with 2 public subnets in two AZs
+    2.	(1) Amazon EC2 Instance Role (Used for all EC2 Instances)
+    3.	(2) Security Groups
+        a.	(1) Onprem Domain Controller SG
+        b.	(1) Domain Member SG
+    4.	(1) Amazon Route 53 Outbound Resolver with rules for self-managed AD and AWS Managed Microsoft AD
+    5.	(1) AWS Managed Microsoft AD (MAD)
+    6.	(3) Amazon EC2 Instances
+        a.	(1) Joined to MAD with PKI, AD Management tools, and SQL Management tool installed
+        b.	(1) Self-managed AD domain controller with AD trust created with MAD
+        c.	(1) Joined to self-managed AD with PKI, and AD Management tools
+    7.	Optional: (1) Amazon RDS SQL Server Instance with Service role and Subnet Group joined to MAD
+    8.	Optional: (1) Amazon FSX for Windows Server joined to MAD
+    9.	Optional: (1) Amazon FSX for Windows Server joined to self-managed AD
 Parameters:
     AdminPassword:
         AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
@@ -12,6 +28,31 @@ Parameters:
         Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
         Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    IntegrateFSxwMAD:
+        AllowedValues:
+            - 'Yes'
+            - 'No'
+        Default: 'Yes'
+        Description: Deploy & Integrate Amazon FSX for Windows with AWS Managed Microsft AD
+        Type: String
+    IntegrateFSxwSMMAD:
+        AllowedValues:
+            - 'Yes'
+            - 'No'
+        Default: 'Yes'
+        Description: Deploy & Integrate Amazon FSX for Windows with On-Premises AD
+        Type: String
+    IntegrateRDSwMAD:
+        AllowedValues:
+            - 'Yes'
+            - 'No'
+        Default: 'Yes'
+        Description: Deploy & Integrate Amazon RDS SQL Server Instance with AWS Managed Microsft AD
+        Type: String
+    FSxwSMMADOU:
+        Default: 'DC=onpremises,DC=local'
+        Description: Parent DN for Amazon FSX for Windows OU (Only used when deployment with On-Premises AD)
+        Type: String
     MADDomainName:
         AllowedPattern: ^([a-zA-Z0-9]+[\\.-])+([a-zA-Z0-9])+$
         Default: corp.example.com
@@ -50,8 +91,8 @@ Parameters:
         Type: String
     TrustDirection:
         AllowedValues:
-        - Two-Way
-        - One-Way
+            - Two-Way
+            - One-Way
         Default: Two-Way
         Description: Trust Direction from AWS Managed Microsft AD to on-premises domain.
         Type: String
@@ -59,7 +100,7 @@ Metadata:
     AWS::CloudFormation::Interface:
         ParameterGroups:
             - Label:
-                  default: Configuration
+                  default: Main Configuration
               Parameters:
                   - AdminPassword
                   - AMI
@@ -67,13 +108,28 @@ Metadata:
                   - MADNetBIOSName
                   - OnpremDomainName
                   - OnpremNetBIOSName
-                  - RDSPassword
                   - TrustDirection
+            - Label:
+                  default: Add-Ons
+              Parameters:
+                  - IntegrateRDSwMAD
+                  - RDSPassword
+                  - IntegrateFSxwMAD
+                  - IntegrateFSxwSMMAD
+                  - FSxwSMMADOU
         ParameterLabels:
             AdminPassword:
                 default: Admin & Trusts Password
             AMI:
                 default: SSM Parameter Value for Latest AMI ID
+            IntegrateFSxwMAD:
+                default: Deploy FSX for Windows for AWS Managed Microsft AD
+            IntegrateFSxwSMMAD:
+                default: Deploy FSX for Windows for On-Premises AD
+            IntegrateRDSwMAD:
+                default: Deploy Amazon RDS SQL Server Instance for AWS Managed Microsft AD
+            FSxwSMMADOU:
+                default: OU for Amazon FSX for Windows deployment for On-Premises AD
             MADDomainName:
                 default: AWS Managed Microsft AD Domain DNS Name
             MADNetBIOSName:
@@ -86,6 +142,10 @@ Metadata:
                 default: Amazon RDS SQL Instance Password
             TrustDirection:
                 default: Trust Direction from AWS Managed Microsft AD
+Conditions:
+  YesIntegrateRDSwMAD: !Equals [!Ref IntegrateRDSwMAD, 'Yes']
+  YesIntegrateFSxwMAD: !Equals [!Ref IntegrateFSxwMAD, 'Yes']
+  YesIntegrateFSxwSMMAD: !Equals [!Ref IntegrateFSxwSMMAD, 'Yes']
 Resources:
     VPC:
         Type: AWS::EC2::VPC
@@ -218,56 +278,36 @@ Resources:
                                 - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:*:document/AWS-RunPowerShellScript
                           - Action: ssm:SendCommand
                             Condition:
-                                StringEquals:
-                                    ? ssm:ResourceTag/aws:cloudformation:stack-name
-                                    : Ref: AWS::StackName
+                                StringEquals: 
+                                    'ssm:ResourceTag/aws:cloudformation:stack-name': !Ref AWS::StackName
                             Effect: Allow
                             Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                          - Action: ssm:StartAutomationExecution
+                            Effect: Allow
+                            Resource:
+                                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${MgmtInstanceSSMAuto}:$DEFAULT
+                                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${OnPremDomainControllerSsmAuto}:$DEFAULT
+                                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${OnPremDomainControllerAuditPolSsmAuto}:$DEFAULT
+                                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${OnpremPkiInstanceSSMAuto}:$DEFAULT
+                                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${PkiInstanceAuditPolSsmAuto}:$DEFAULT
                           - Action:
-                                - ds:AddRegion
                                 - ds:CreateConditionalForwarder
-                                - ds:CreateLogSubscription
-                                - ds:CreateMicrosoftAD
                                 - ds:CreateTrust
-                                - ds:DeleteConditionalForwarder
-                                - ds:DeleteTrust
-                                - ds:Describe*
-                                - ds:Get*
-                                - ds:List*
-                                - ds:RegisterEventTopic
-                                - ds:RejectSharedDirectory
-                                - ds:RemoveRegion
-                                - ds:ShareDirectory
-                                - ds:UnshareDirectory
-                                - ds:UpdateConditionalForwarder
-                                - ds:UpdateTrust
+                                - ds:DescribeTrusts
                                 - ds:VerifyTrust
+                            Effect: Allow
+                            Resource: "*"
+                          - Action:
                                 - ec2:AuthorizeSecurityGroupEgress
-                                - ec2:AuthorizeSecurityGroupIngress
-                                - ec2:CreateNetworkInterface
-                                - ec2:CreateSecurityGroup
-                                - ec2:DeleteNetworkInterface
-                                - ec2:DeleteSecurityGroup
-                                - ec2:DescribeInstances
-                                - ec2:DescribeNetworkInterfaces
-                                - ec2:DescribeSubnets
-                                - ec2:DescribeVpcs
-                                - ec2:RevokeSecurityGroupEgress
-                                - ec2:RevokeSecurityGroupIngress
                                 - ec2:DescribeSecurityGroups
-                                - logs:CreateLogGroup
-                                - logs:GetLogEvents
-                                - logs:PutResourcePolicy
-                                - sns:GetTopicAttributes
-                                - sns:ListSubscriptions
-                                - sns:ListSubscriptionsByTopic
-                                - sns:ListTopics
+                            Effect: Allow
+                            Resource: "*"
+                          - Action:
+                                - ec2:DescribeInstances
                                 - ssm:DescribeInstanceInformation
                                 - ssm:GetAutomationExecution
                                 - ssm:ListCommands
                                 - ssm:ListCommandInvocations
-                                - ssm:StartAutomationExecution
-                                - sts:GetCallerIdentity
                             Effect: Allow
                             Resource: "*"
                   PolicyName: Inline-Policy
@@ -283,6 +323,7 @@ Resources:
                 - Ref: InstanceRole
     RDSRole:
         Type: AWS::IAM::Role
+        Condition: YesIntegrateRDSwMAD
         Properties:
             AssumeRolePolicyDocument:
                 Statement:
@@ -301,12 +342,13 @@ Resources:
                       Ref: AWS::StackName
     RdsDBSubnetGroup:
         Type: AWS::RDS::DBSubnetGroup
+        Condition: YesIntegrateRDSwMAD
         Properties:
             DBSubnetGroupDescription: Demo-DBSubnetGroup
             SubnetIds:
                 - !Ref VPCPublicSubnet1Subnet
                 - !Ref VPCPublicSubnet2Subnet
-    DomainMemberSG:
+    DomainMembersSG:
         Type: AWS::EC2::SecurityGroup
         Properties:
             GroupDescription: MAD Domain Members and RDS SG
@@ -463,7 +505,10 @@ Resources:
                 - SubnetId: !Ref VPCPublicSubnet1Subnet
                 - SubnetId: !Ref VPCPublicSubnet2Subnet
             SecurityGroupIds:
-                - !Ref 'DomainMemberSG'
+                - !Ref 'DomainMembersSG'
+            Tags:
+                - Key: Name
+                  Value: DemoR53Resolver
     MgmtInstanceSSMAuto:
         Type: AWS::SSM::Document
         Properties:
@@ -589,7 +634,7 @@ Resources:
 
                                             Write-Output 'Data Volume creating new partition'
                                             Try {
-                                                $DriveLetter = New-Partition -DiskNumber $BlankDisk -AssignDriveLetter -UseMaximumSize -ErrorAction Stop | Select-Object -ExpandProperty 'DriveLetter'
+                                                $DriveLetter = New-Partition -Alignment '4096000' -DiskNumber $BlankDisk -AssignDriveLetter -UseMaximumSize -ErrorAction Stop | Select-Object -ExpandProperty 'DriveLetter'
                                             } Catch [System.Exception] {
                                                 Write-Output "Failed creating new partition $_"
                                                 Exit 1
@@ -1643,7 +1688,6 @@ Resources:
                                         }
                                         Default { Throw 'InvalidArgument: Invalid value is passed for parameter TrustDirection' }
                                     }
-
 
                                     $TrustTypeForest = New-Object -TypeName 'Amazon.DirectoryService.TrustType' -ArgumentList 'Forest'
                                     $TrustDir = New-Object -TypeName 'Amazon.DirectoryService.TrustDirection' -ArgumentList $TrustDirMAD
@@ -2762,6 +2806,12 @@ Resources:
                     DomainNetBIOSName:
                         description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. ONPREMISES
                         type: String
+                    FSxwSMMADOU:
+                        description: OU DN for Amazon FSX for Windows deployment with On-Premises AD
+                        type: String
+                    IntegrateFSxwSMMAD:
+                        description: Deploy & Integrate Amazon FSX for Windows with On-Premises AD
+                        type: String
                     MadDNSName:
                         description: Fully qualified domain name (FQDN) of the MAD domain e.g. corp.example.com
                         type: String
@@ -2875,7 +2925,7 @@ Resources:
 
                                             Write-Output 'Data Volume creating new partition'
                                             Try {
-                                                $DriveLetter = New-Partition -DiskNumber $BlankDisk -AssignDriveLetter -UseMaximumSize -ErrorAction Stop | Select-Object -ExpandProperty 'DriveLetter'
+                                                $DriveLetter = New-Partition -Alignment '4096000' -DiskNumber $BlankDisk -AssignDriveLetter -UseMaximumSize -ErrorAction Stop | Select-Object -ExpandProperty 'DriveLetter'
                                             } Catch [System.Exception] {
                                                 Write-Output "Failed creating new partition $_"
                                                 Exit 1
@@ -3516,132 +3566,135 @@ Resources:
                                         }
                                     }
 
-                                    Write-Output 'Getting domain information'
-                                    Try {
-                                        $Domain = Get-ADDomain -ErrorAction Stop
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to get domain information $_"
-                                        Exit 1
-                                    }
-
-                                    $FQDN = $Domain | Select-Object -ExpandProperty 'DNSRoot'
-                                    $BaseDn = $Domain | Select-Object -ExpandProperty 'DistinguishedName'
-
-                                    Write-Output 'Creating OU FSx'
-                                    Try {
-                                        New-ADOrganizationalUnit -Name 'FSx' -Path $BaseDn -ProtectedFromAccidentalDeletion $True -ErrorAction Stop
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to create OU FSx $_"
-                                        Exit 1
-                                    }
-
-                                    $User = @{
-                                        AccountPassword        = '{{AdminPassword}}' | ConvertTo-SecureString -AsPlainText -Force
-                                        Name                   = 'FSxServiceAccount'
-                                        DisplayName            = 'FSxServiceAccount'
-                                        SamAccountName         = 'FSxServiceAccount'
-                                        UserPrincipalName      = "FSxServiceAccount@$FQDN"
-                                        KerberosEncryptionType = 'AES128', 'AES256'
-                                        PasswordNeverExpires   = $True
-                                        Enabled                = $True
-                                        Path                   = "OU=FSx,$BaseDn"
-                                    }
-
-                                    Write-Output 'Creating FSxServiceAccount'
-                                    Try {
-                                        New-ADUser @User
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to create FSxServiceAccount $_"
-                                        Exit 1
-                                    }
-
-                                    Try {
-                                        New-ADGroup -DisplayName 'FSxAdmins' -GroupCategory 'Security' -GroupScope 'DomainLocal' -Name 'FSxAdmins' -Path "OU=FSx,$BaseDn" -SamAccountName 'FSxAdmins'
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to create FSxServiceAccount $_"
-                                        Exit 1
-                                    }
-
-                                    Write-Output 'Getting RootDSE information'
-                                    Try {
-                                        $RootDse = Get-ADRootDSE -ErrorAction Stop
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to get RootDSE information $_"
-                                        Exit 1
-                                    }
-
-                                    Write-Output 'Getting computer SchemaNamingContext'
-                                    Try {
-                                        [System.GUID]$ComputerNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'computer' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to get computer SchemaNamingContext $_"
-                                        Exit 1
-                                    }
-
-                                    $ExtendedRightsMap = @{ }
-
-                                    Write-Output 'Getting ExtendedRightsMap'
-                                    Try {
-                                        $ErNamingContexts = Get-ADObject -SearchBase $RootDse.ConfigurationNamingContext -LDAPFilter '(&(objectclass=controlAccessRight)(rightsguid=*))' -Properties displayName, rightsGuid -ErrorAction Stop
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to get ExtendedRightsMap $_"
-                                        Exit 1
-                                    }
-
-                                    ForEach ($ErNamingContext in $ErNamingContexts) {
-                                        $ExtendedRightsMap[$ErNamingContext.displayName] = [System.GUID]$ErNamingContext.rightsGuid
-                                    }
-
-                                    $NullGuid = [guid]'00000000-0000-0000-0000-000000000000'
-
-                                    $AclRules = @(
-                                        @{
-                                            ActiveDirectoryRights              = 'CreateChild, DeleteChild'
-                                            AccessControlType                  = 'Allow'
-                                            ObjectGUID                         = $ComputerNameGuid
-                                            ActiveDirectorySecurityInheritance = 'All'
-                                            InheritedObjectGuid                = $NullGuid
-                                        },
-                                        @{
-                                            ActiveDirectoryRights              = 'ExtendedRight'
-                                            AccessControlType                  = 'Allow'
-                                            ObjectGUID                         = $ExtendedRightsMap['Validated write to service principal name']
-                                            ActiveDirectorySecurityInheritance = 'Descendents'
-                                            InheritedObjectGuid                = $ComputerNameGuid
-                                        },
-                                        @{
-                                            ActiveDirectoryRights              = 'ExtendedRight'
-                                            AccessControlType                  = 'Allow'
-                                            ObjectGUID                         = $ExtendedRightsMap['Account Restrictions']
-                                            ActiveDirectorySecurityInheritance = 'Descendents'
-                                            InheritedObjectGuid                = $ComputerNameGuid
-                                        },
-                                        @{
-                                            ActiveDirectoryRights              = 'ExtendedRight'
-                                            AccessControlType                  = 'Allow'
-                                            ObjectGUID                         = $ExtendedRightsMap['Reset Password']
-                                            ActiveDirectorySecurityInheritance = 'Descendents'
-                                            InheritedObjectGuid                = $ComputerNameGuid
-                                        },
-                                        @{
-                                            ActiveDirectoryRights              = 'ExtendedRight'
-                                            AccessControlType                  = 'Allow'
-                                            ObjectGUID                         = $ExtendedRightsMap['Validated write to DNS host name']
-                                            ActiveDirectorySecurityInheritance = 'Descendents'
-                                            InheritedObjectGuid                = $ComputerNameGuid
+                                    If ('{{IntegrateFSxwSMMAD}}' -eq 'Yes') {
+                                        Write-Output 'Getting domain information'
+                                        Try {
+                                            $Domain = Get-ADDomain -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get domain information $_"
+                                            Exit 1
                                         }
-                                    )
 
-                                    Write-Output 'Getting FSxServiceAccount SID'
-                                    Try {
-                                        $IdentityReference = Get-ADUser -Identity 'FSxServiceAccount' -ErrorAction Stop | Select-Object -ExpandProperty 'SID'
-                                    } Catch [System.Exception] {
-                                        Write-Output "Failed to get FSxServiceAccount SID $_"
-                                        Exit 1
-                                    }
+                                        $FQDN = $Domain | Select-Object -ExpandProperty 'DNSRoot'
 
-                                    Foreach ($AclRule in $AclRules) {
-                                        Add-FSxOuAcl -AclPath "OU=FSx,$BaseDn" -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.ActiveDirectoryRights -AccessControlType $AclRule.AccessControlType -ObjectGUID $AclRule.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.ActiveDirectorySecurityInheritance -InheritedObjectGuid $AclRule.InheritedObjectGuid
+                                        $FsxOU = "OU=FSx,{{FSxwSMMADOU}}"
+
+                                        Write-Output 'Creating OU FSx'
+                                        Try {
+                                            New-ADOrganizationalUnit -Name 'FSx' -Path '{{FSxwSMMADOU}}' -ProtectedFromAccidentalDeletion $True -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to create OU FSx $_"
+                                            Exit 1
+                                        }
+
+                                        $User = @{
+                                            AccountPassword        = '{{AdminPassword}}' | ConvertTo-SecureString -AsPlainText -Force
+                                            Name                   = 'FSxServiceAccount'
+                                            DisplayName            = 'FSxServiceAccount'
+                                            SamAccountName         = 'FSxServiceAccount'
+                                            UserPrincipalName      = "FSxServiceAccount@$FQDN"
+                                            KerberosEncryptionType = 'AES128', 'AES256'
+                                            PasswordNeverExpires   = $True
+                                            Enabled                = $True
+                                            Path                   = $FsxOU 
+                                        }
+
+                                        Write-Output 'Creating FSxServiceAccount'
+                                        Try {
+                                            New-ADUser @User
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to create FSxServiceAccount $_"
+                                            Exit 1
+                                        }
+
+                                        Try {
+                                            New-ADGroup -DisplayName 'FSxAdmins' -GroupCategory 'Security' -GroupScope 'DomainLocal' -Name 'FSxAdmins' -Path $FsxOU -SamAccountName 'FSxAdmins'
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to create FSxServiceAccount $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Getting RootDSE information'
+                                        Try {
+                                            $RootDse = Get-ADRootDSE -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get RootDSE information $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Getting computer SchemaNamingContext'
+                                        Try {
+                                            [System.GUID]$ComputerNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'computer' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get computer SchemaNamingContext $_"
+                                            Exit 1
+                                        }
+
+                                        $ExtendedRightsMap = @{ }
+
+                                        Write-Output 'Getting ExtendedRightsMap'
+                                        Try {
+                                            $ErNamingContexts = Get-ADObject -SearchBase $RootDse.ConfigurationNamingContext -LDAPFilter '(&(objectclass=controlAccessRight)(rightsguid=*))' -Properties displayName, rightsGuid -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get ExtendedRightsMap $_"
+                                            Exit 1
+                                        }
+
+                                        ForEach ($ErNamingContext in $ErNamingContexts) {
+                                            $ExtendedRightsMap[$ErNamingContext.displayName] = [System.GUID]$ErNamingContext.rightsGuid
+                                        }
+
+                                        $NullGuid = [guid]'00000000-0000-0000-0000-000000000000'
+
+                                        $AclRules = @(
+                                            @{
+                                                ActiveDirectoryRights              = 'CreateChild, DeleteChild'
+                                                AccessControlType                  = 'Allow'
+                                                ObjectGUID                         = $ComputerNameGuid
+                                                ActiveDirectorySecurityInheritance = 'All'
+                                                InheritedObjectGuid                = $NullGuid
+                                            },
+                                            @{
+                                                ActiveDirectoryRights              = 'ExtendedRight'
+                                                AccessControlType                  = 'Allow'
+                                                ObjectGUID                         = $ExtendedRightsMap['Validated write to service principal name']
+                                                ActiveDirectorySecurityInheritance = 'Descendents'
+                                                InheritedObjectGuid                = $ComputerNameGuid
+                                            },
+                                            @{
+                                                ActiveDirectoryRights              = 'ExtendedRight'
+                                                AccessControlType                  = 'Allow'
+                                                ObjectGUID                         = $ExtendedRightsMap['Account Restrictions']
+                                                ActiveDirectorySecurityInheritance = 'Descendents'
+                                                InheritedObjectGuid                = $ComputerNameGuid
+                                            },
+                                            @{
+                                                ActiveDirectoryRights              = 'ExtendedRight'
+                                                AccessControlType                  = 'Allow'
+                                                ObjectGUID                         = $ExtendedRightsMap['Reset Password']
+                                                ActiveDirectorySecurityInheritance = 'Descendents'
+                                                InheritedObjectGuid                = $ComputerNameGuid
+                                            },
+                                            @{
+                                                ActiveDirectoryRights              = 'ExtendedRight'
+                                                AccessControlType                  = 'Allow'
+                                                ObjectGUID                         = $ExtendedRightsMap['Validated write to DNS host name']
+                                                ActiveDirectorySecurityInheritance = 'Descendents'
+                                                InheritedObjectGuid                = $ComputerNameGuid
+                                            }
+                                        )
+
+                                        Write-Output 'Getting FSxServiceAccount SID'
+                                        Try {
+                                            $IdentityReference = Get-ADUser -Identity 'FSxServiceAccount' -ErrorAction Stop | Select-Object -ExpandProperty 'SID'
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get FSxServiceAccount SID $_"
+                                            Exit 1
+                                        }
+
+                                        Foreach ($AclRule in $AclRules) {
+                                            Add-FSxOuAcl -AclPath $FsxOU -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.ActiveDirectoryRights -AccessControlType $AclRule.AccessControlType -ObjectGUID $AclRule.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.ActiveDirectorySecurityInheritance -InheritedObjectGuid $AclRule.InheritedObjectGuid
+                                        }
                                     }
 
                                     $TrustDirection = '{{TrustDirection}}'
@@ -5146,7 +5199,7 @@ Resources:
 
                                             Write-Output 'Data Volume creating new partition'
                                             Try {
-                                                $DriveLetter = New-Partition -DiskNumber $BlankDisk -AssignDriveLetter -UseMaximumSize -ErrorAction Stop | Select-Object -ExpandProperty 'DriveLetter'
+                                                $DriveLetter = New-Partition -Alignment '4096000' -DiskNumber $BlankDisk -AssignDriveLetter -UseMaximumSize -ErrorAction Stop | Select-Object -ExpandProperty 'DriveLetter'
                                             } Catch [System.Exception] {
                                                 Write-Output "Failed creating new partition $_"
                                                 Exit 1
@@ -6248,13 +6301,16 @@ Resources:
         Type: AWS::Route53Resolver::ResolverRule
         DependsOn: ManagedAD
         Properties:
-            Name: MAD-Rule
+            Name: DemoR53MadRule
             DomainName: !Ref MADDomainName
             ResolverEndpointId: !Ref R53RROutbound
             RuleType: FORWARD
             TargetIps:
                 - Ip: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
                 - Ip: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
+            Tags:
+                - Key: Name
+                  Value: DemoR53MadRule
     RR53RRAssocMad:
         Type: AWS::Route53Resolver::ResolverRuleAssociation
         Properties:
@@ -6262,6 +6318,7 @@ Resources:
             VPCId: !Ref VPC
     RdsDB:
         Type: AWS::RDS::DBInstance
+        Condition: YesIntegrateRDSwMAD
         DependsOn: ManagedAD
         Properties:
             AllocatedStorage: 20
@@ -6269,7 +6326,7 @@ Resources:
                 - 0
                 - Fn::GetAZs: !Ref AWS::Region
             DBInstanceClass: db.t3.xlarge
-            DBInstanceIdentifier: DemoRDS
+            DBInstanceIdentifier: DemoRDSMad
             DBSubnetGroupName: !Ref RdsDBSubnetGroup
             Domain: !Ref ManagedAD
             DomainIAMRoleName: !Ref RDSRole
@@ -6280,25 +6337,32 @@ Resources:
             MasterUserPassword: !Ref RDSPassword
             StorageType: gp2
             VPCSecurityGroups:
-                - !Ref DomainMemberSG
+                - !Ref DomainMembersSG
+            Tags:
+                - Key: Name
+                  Value: DemoRDSMad
     FSxMAD:
         Type: AWS::FSx::FileSystem
+        Condition: YesIntegrateFSxwMAD
         DependsOn: ManagedAD
-        Properties: 
+        Properties:
             FileSystemType: WINDOWS
-            SecurityGroupIds: 
-                - !Ref DomainMemberSG
+            SecurityGroupIds:
+                - !Ref DomainMembersSG
             StorageCapacity: 32
             StorageType: SSD
-            SubnetIds: 
+            SubnetIds:
                 - !Ref VPCPublicSubnet1Subnet
-            WindowsConfiguration: 
+            WindowsConfiguration:
                 ActiveDirectoryId: !Ref ManagedAD
-                Aliases: 
-                    - !Join [ '.', [ DemoFSx, !Ref MADDomainName ] ]
+                Aliases:
+                    - !Join [ '.', [ DemoFSxMad, !Ref MADDomainName ] ]
                 AutomaticBackupRetentionDays: 0
                 DeploymentType: SINGLE_AZ_2
                 ThroughputCapacity: 16
+            Tags:
+                - Key: Name
+                  Value: DemoFSxMad
     OnPremDomainController:
         Type: AWS::EC2::Instance
         DependsOn: ManagedAD
@@ -6344,6 +6408,8 @@ Resources:
                             ServerNetBIOSName = 'ONPREM-DC01'
                             DomainDNSName = '${DomainDNSName}'
                             DomainNetBIOSName = '${DomainNetBIOSName}'
+                            IntegrateFSxwSMMAD = '${IntegrateFSxwSMMAD}'
+                            FSxwSMMADOU = '${FSxwSMMADOU}'
                             MadDNSName = '${MadDNSName}'
                             StackName = '${AWS::StackName}'
                             TrustDirection = '${TrustDirection}'
@@ -6355,6 +6421,8 @@ Resources:
                     - AdminPassword: !Ref AdminPassword
                       DomainDNSName: !Ref OnpremDomainName
                       DomainNetBIOSName: !Ref OnpremNetBIOSName
+                      IntegrateFSxwSMMAD: !Ref IntegrateFSxwSMMAD
+                      FSxwSMMADOU: !Ref FSxwSMMADOU
                       MadDNSName: !Ref MADDomainName
                       TrustDirection: !Ref TrustDirection
                       VPCCIDR: !GetAtt VPC.CidrBlock
@@ -6385,7 +6453,7 @@ Resources:
             ImageId: !Ref AMI
             InstanceType: t3.large
             SecurityGroupIds:
-                - !Ref DomainMemberSG
+                - !Ref DomainMembersSG
             SubnetId: !Ref VPCPublicSubnet1Subnet
             Tags:
                 - Key: Name
@@ -6415,39 +6483,46 @@ Resources:
                       VPCCIDR: !GetAtt VPC.CidrBlock
     FSxOnprem:
         Type: AWS::FSx::FileSystem
+        Condition: YesIntegrateFSxwSMMAD
         DependsOn: OnPremDomainController
-        Properties: 
+        Properties:
             FileSystemType: WINDOWS
-            SecurityGroupIds: 
-                - !Ref DomainMemberSG
+            SecurityGroupIds:
+                - !Ref DomainMembersSG
             StorageCapacity: 32
             StorageType: SSD
-            SubnetIds: 
+            SubnetIds:
                 - !Ref VPCPublicSubnet1Subnet
-            WindowsConfiguration: 
-                Aliases: 
-                    - !Join [ '.', [ DemoFSx, !Ref OnpremDomainName ] ]
+            WindowsConfiguration:
+                Aliases:
+                    - !Join [ '.', [ DemoFSxOnprem, !Ref OnpremDomainName ] ]
                 AutomaticBackupRetentionDays: 0
                 DeploymentType: SINGLE_AZ_2
                 SelfManagedActiveDirectoryConfiguration:
-                  DnsIps: 
+                  DnsIps:
                     - !GetAtt OnPremDomainController.PrivateIp
                   DomainName: !Ref OnpremDomainName
                   FileSystemAdministratorsGroup: FSxAdmins
-                  OrganizationalUnitDistinguishedName: 'OU=FSx,DC=onpremises,DC=local'
+                  OrganizationalUnitDistinguishedName: !Join [ ',', [ OU=FSx, !Ref FSxwSMMADOU ] ]
                   Password: !Ref AdminPassword
                   UserName: FSxServiceAccount
                 ThroughputCapacity: 16
+            Tags:
+                - Key: Name
+                  Value: DemoFSxOnprem
     RR53RuleOnprem:
         Type: AWS::Route53Resolver::ResolverRule
         DependsOn: OnPremDomainController
         Properties:
-            Name: Onprem-Rule
+            Name: DemoR53OnpremRule
             DomainName: !Ref OnpremDomainName
             ResolverEndpointId: !Ref R53RROutbound
             RuleType: FORWARD
             TargetIps:
                 - Ip: !GetAtt OnPremDomainController.PrivateIp
+            Tags:
+                - Key: Name
+                  Value: DemoR53OnpremRule
     RR53RRAssocOnprem:
         Type: AWS::Route53Resolver::ResolverRuleAssociation
         Properties:
@@ -6480,7 +6555,7 @@ Resources:
             ImageId: !Ref AMI
             InstanceType: t3.large
             SecurityGroupIds:
-                - !Ref DomainMemberSG
+                - !Ref DomainMembersSG
             SubnetId: !Ref VPCPublicSubnet1Subnet
             Tags:
                 - Key: Name
@@ -6547,22 +6622,4 @@ Outputs:
         Value: !Ref OnPremDomainControllerSG
     DomainMemberSGID:
         Description: Domain Members Security Group ID
-        Value: !Ref DomainMemberSG
-    MadFSxFileSystemId:
-        Description: FileSystem ID of FSx
-        Value: !Ref FSxMAD
-    MadFSxFileSystemDNSName:
-        Description: FSx DNS Name
-        Value: !GetAtt FSxMAD.DNSName
-    OnpremFSxFileSystemId:
-        Description: FileSystem ID of FSx
-        Value: !Ref FSxOnprem
-    OnpremFSxFileSystemDNSName:
-        Description: FSx DNS Name
-        Value: !GetAtt FSxOnprem.DNSName
-    RDSInstanceName:
-        Description: Instance Name of RDS Instance
-        Value: !Ref RdsDB
-    RDSInstanceEnpoint:
-        Description: Domain Members Security Group ID
-        Value: !GetAtt RdsDB.Endpoint.Address
+        Value: !Ref DomainMembersSG
