@@ -1,20 +1,20 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  This template creates the following items:
-    1.	Brand new VPC with 2 public subnets in two AZs
+  This template creates the following:
+    1.	New VPC w/ 2 public subnets in two AZs
     2.	(1) Amazon EC2 Instance Role (Used for all EC2 Instances)
     3.	(2) Security Groups
         a.	(1) Onprem Domain Controller SG
         b.	(1) Domain Member SG
-    4.	(1) Amazon Route 53 Outbound Resolver with rules for self-managed AD and AWS Managed Microsoft AD
-    5.	(1) AWS Managed Microsoft AD (MAD)
-    6.	(3) Amazon EC2 Instances
-        a.	(1) Joined to MAD with PKI, AD Management tools, and SQL Management tool installed
-        b.	(1) Self-managed AD domain controller with AD trust created with MAD
-        c.	(1) Joined to self-managed AD with PKI, and AD Management tools
-    7.	Optional: (1) Amazon RDS SQL Server Instance with Service role and Subnet Group joined to MAD
-    8.	Optional: (1) Amazon FSX for Windows Server joined to MAD
-    9.	Optional: (1) Amazon FSX for Windows Server joined to self-managed AD
+    4.	(1) Amazon Route 53 Outbound Resolver w/ rules for self-managed AD and AWS Managed Microsoft AD
+    5.	(1) AWS Managed Microsoft AD (MAD Enterprise)
+    6.	(3) Amazon EC2 Instances (All t3.large, 60Gb (C:) GP3, 10GB (D:))
+        a.	(1) Joined to MAD w/ PKI, AD Mgmt tools, and SQL Mgmt tool installed
+        b.	(1) Self-managed AD domain controller w/ AD trust w/ MAD
+        c.	(1) Joined to self-managed AD w/ PKI and AD Mgmt tools
+    7.	Optional: (1) Single AZ Amazon RDS SQL Server 2019 Instance w/ Service role & Subnet Group joined to MAD (db.t3.xlargea and 20GB GP2)
+    8.	Optional: (1) Single AZ Amazon FSX for Windows Server joined to MAD (32GB SSD and 16 MB/s Tcap)
+    9.	Optional: (1) Single AZ Amazon FSX for Windows Server joined to self-managed AD (32GB SSD and 16 MB/s Tcap)
 Parameters:
     AdminPassword:
         AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
@@ -6335,6 +6335,7 @@ Resources:
             LicenseModel: license-included
             MasterUsername: admin
             MasterUserPassword: !Ref RDSPassword
+            MultiAZ: false
             StorageType: gp2
             VPCSecurityGroups:
                 - !Ref DomainMembersSG
