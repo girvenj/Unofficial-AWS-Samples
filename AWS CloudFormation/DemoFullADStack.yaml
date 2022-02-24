@@ -2685,6 +2685,7 @@ Resources:
                                                 'Namespace' = 'EC2-Domain-Member-Metrics'
                                                 'Region' = 'ReplaceMe'
                                                 'Id' = 'CloudWatchSink'
+                                                'Interval' = '60'
                                                 'SinkType' = 'CloudWatch'
                                             },
                                             @{
@@ -4852,6 +4853,7 @@ Resources:
                                                 'Namespace' = 'EC2-Domain-Controller-Metrics'
                                                 'Region' = 'ReplaceMe'
                                                 'Id' = 'CloudWatchSink'
+                                                'Interval' = '60'
                                                 'SinkType' = 'CloudWatch'
                                             },
                                             @{
