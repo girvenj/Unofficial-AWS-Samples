@@ -3608,10 +3608,11 @@ Resources:
                                             Exit 1
                                         }
 
+                                        Write-Output 'Creating FSx Admins Group'
                                         Try {
                                             New-ADGroup -DisplayName 'FSxAdmins' -GroupCategory 'Security' -GroupScope 'DomainLocal' -Name 'FSxAdmins' -Path $FsxOU -SamAccountName 'FSxAdmins'
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to create FSxServiceAccount $_"
+                                            Write-Output "Failed to create FSx Admins Group $_"
                                             Exit 1
                                         }
 
