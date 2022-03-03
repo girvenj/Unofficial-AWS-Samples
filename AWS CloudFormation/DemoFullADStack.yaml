@@ -12,9 +12,9 @@ Description: >-
         a.	(1) Joined to MAD w/ PKI, AD Mgmt tools, and SQL Mgmt tool installed
         b.	(1) Self-managed AD domain controller w/ AD trust w/ MAD
         c.	(1) Joined to self-managed AD w/ PKI and AD Mgmt tools
-    7.	Optional: (1) Single AZ Amazon RDS SQL Server 2019 Instance w/ Service role & Subnet Group joined to MAD (db.t3.xlargea and 20GB GP2)
-    8.	Optional: (1) Single AZ Amazon FSX for Windows Server joined to MAD (32GB SSD and 16 MB/s Tcap)
-    9.	Optional: (1) Single AZ Amazon FSX for Windows Server joined to self-managed AD (32GB SSD and 16 MB/s Tcap)
+    7.	Opt: (1) Single AZ Amazon RDS SQL Server 2019 Instance w/ Service role & Subnet Group joined to MAD (db.t3.xlargea and 20GB GP2)
+    8.	Opt: (1) Single AZ Amazon FSX for Windows Server joined to MAD (32GB SSD and 16 MB/s Tcap)
+    9.	Opt: (1) Single AZ Amazon FSX for Windows Server joined to self-managed AD (32GB SSD and 16 MB/s Tcap)
 Parameters:
     AdminPassword:
         AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
