@@ -31,8 +31,8 @@ Function Set-LabInstance {
 
     Write-ToLog -InvocationName $ServiceName -LogData 'Getting region' -Severity 'INFO'
     Try {
-        [string]$Token = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '3600'} -Method 'PUT' -Uri 'http://169.254.169.254/latest/api/token' -UseBasicParsing -ErrorAction Stop
-        $Region = (Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token} -Method 'GET' -Uri 'http://169.254.169.254/latest/dynamic/instance-identity/document' -UseBasicParsing  -ErrorAction Stop | Select-Object -ExpandProperty 'Region').ToUpper()
+        [string]$Token = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '3600' } -Method 'PUT' -Uri 'http://169.254.169.254/latest/api/token' -UseBasicParsing -ErrorAction Stop
+        $Region = (Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token } -Method 'GET' -Uri 'http://169.254.169.254/latest/dynamic/instance-identity/document' -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'Region').ToUpper()
     } Catch [System.Exception] {
         Write-ToLog -InvocationName $ServiceName -LogData "Failed to get region $_" -Severity 'ERROR'
         Exit 1
@@ -393,7 +393,7 @@ Function Write-ToLog {
     #==================================================
     # Main
     #==================================================
-    $Output ="[$(Get-Date -Format 'yyyy-MM-dd-THH:mm:ss')][$Severity][$InvocationName]$LogData"
+    $Output = "[$(Get-Date -Format 'yyyy-MM-dd-THH:mm:ss')][$Severity][$InvocationName]$LogData"
     Write-Output $Output
     $Logs = Join-Path -Path 'C:\' -ChildPath 'Logs'
     If (-not (Test-Path -Path $Logs)) { 
@@ -493,7 +493,7 @@ Function New-VolumeFromRawDisk {
 
         Write-ToLog -InvocationName $ServiceName -LogData 'Data volume creating new partition' -Severity 'INFO'
         Try {
-            $DriveLetter = New-Partition -DiskNumber $BlankDisk -AssignDriveLetter -UseMaximumSize -ErrorAction Stop | Select-Object -ExpandProperty 'DriveLetter'
+            $DriveLetter = New-Partition -Alignment '4096000' -DiskNumber $BlankDisk -AssignDriveLetter -UseMaximumSize -ErrorAction Stop | Select-Object -ExpandProperty 'DriveLetter'
         } Catch [System.Exception] {
             Write-ToLog -InvocationName $ServiceName -LogData "Failed creating new partition $_" -Severity 'ERROR'
             Exit 1
@@ -681,34 +681,52 @@ Function Set-CredSSP {
                 $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
                 Exit 1
             }
-       
-            Write-ToLog -InvocationName $ServiceName -LogData 'Setting CredSSP registry entries' -Severity 'INFO'
+
             $CredDelKeyPresent = Test-Path -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
             If (-not $CredDelKeyPresent) {
+                Write-ToLog -InvocationName $ServiceName -LogData 'Setting CredSSP registry entries' -Severity 'INFO'
                 Try {
                     $CredDelPath = New-Item -Path $RootKey -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-
-                    $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
-                    If (-not $FreshCredKeyPresent) {
-                        $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                    }
-
-                    $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
-                    If (-not $FreshCredKeyNTLMPresent) {
-                        $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                    }
-
-                    $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentials' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                    $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFresh' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                    $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentialsWhenNTLMOnly' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                    $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFreshNTLMOnly' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                    $Null = New-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -PropertyType 'String' -Force -ErrorAction Stop
-                    $Null = New-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -PropertyType 'String' -Force -ErrorAction Stop
                 } Catch [System.Exception] {
                     Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entries $_" -Severity 'ERROR'
                     Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
                     Exit 1
                 }
+            }
+
+            $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
+            If (-not $FreshCredKeyPresent) {
+                Try {
+                    $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                } Catch [System.Exception] {
+                    Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entries $_" -Severity 'ERROR'
+                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                    Exit 1
+                }
+            }
+
+            $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
+            If (-not $FreshCredKeyNTLMPresent) {
+                Try {
+                    $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                } Catch [System.Exception] {
+                    Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entries $_" -Severity 'ERROR'
+                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                    Exit 1
+                }
+            }
+
+            Try {
+                $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentials' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFresh' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentialsWhenNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFreshNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
+                $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
+            } Catch [System.Exception] {
+                Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entries $_" -Severity 'ERROR'
+                Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                Exit 1
             }
         }
         'Disable' {
@@ -744,7 +762,7 @@ Function Invoke-Sysprep {
 
     Remove-Item -Path 'C:\Temp\*' -Recurse -Force
     Remove-Item -Path 'C:\Logs\*' -Recurse -Force -ErrorAction Stop
-    & wevtutil.exe enum-logs | Foreach-Object { & wevtutil.exe clear-log '$_' }
+    & wevtutil.exe enum-logs | ForEach-Object { & wevtutil.exe clear-log '$_' }
     
     $SysPrepFile = "$Env:ProgramData\Amazon\EC2Launch\sysprep\Unattend.xml"
     $SysPrepXml = [xml](Get-Content -Path $SysPrepFile)
@@ -760,7 +778,7 @@ Function Invoke-Sysprep {
     $SysPrepOobeComponent.UserLocale = 'en-US'
     $SysPrepXml.Save($SysPrepFile)
     & ec2launch.exe sysprep -c -s
-    Remove-Item (Get-PSReadlineOption).HistorySavePath -ErrorAction SilentlyContinue
+    Remove-Item (Get-PSReadLineOption).HistorySavePath -ErrorAction SilentlyContinue
 }
 
 Function Get-EniConfig {
@@ -791,9 +809,9 @@ Function Get-EniConfig {
 
     $Output = [PSCustomObject][Ordered]@{
         'GatewayAddress' = $GatewayAddress
-        'IpAddress' = $IpAddr
-        'DnsIpAddress' = $IpAddress
-        'MacAddress' = $MacAddress
+        'IpAddress'      = $IpAddr
+        'DnsIpAddress'   = $IpAddress
+        'MacAddress'     = $MacAddress
         'InterfaceAlias' = $InterfaceAlias
     }
 

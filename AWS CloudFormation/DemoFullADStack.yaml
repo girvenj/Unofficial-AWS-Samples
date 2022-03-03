@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   This template creates the following:
-    1.	New VPC w/ 2 public subnets in two AZs
+    1.	(1) VPC w/ (2) public subnets in (2) AZs
     2.	(1) Amazon EC2 Instance Role (Used for all EC2 Instances)
     3.	(2) Security Groups
         a.	(1) Onprem Domain Controller SG
@@ -1002,7 +1002,6 @@ Resources:
                                             [Parameter(Mandatory = $true)][String]$VPCCIDR
                                         )
 
-                                        $ServiceName = $MyInvocation.MyCommand.Name
                                         $CompName = $env:COMPUTERNAME
                                         $Folders = @(
                                             'D:\Pki\Req',
@@ -1280,28 +1279,28 @@ Resources:
                                             $ScheduledTask = New-ScheduledTask -Action $ScheduledTaskAction -Principal $ScheduledTaskPrincipal -Trigger $ScheduledTaskTrigger -Settings $ScheduledTaskSettingsSet -Description 'Updates CRL to Local Pki Folder' -ErrorAction Stop
                                             $Null = Register-ScheduledTask 'Update CRL' -InputObject $ScheduledTask -ErrorAction Stop
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to register Update CRL scheduled task $_" -Severity 'WARN'
+                                            Write-Output "Failed to register Update CRL scheduled task $_"
                                         }
 
                                         Write-Output 'Running CRL scheduled task'
                                         Try {
                                             Start-ScheduledTask -TaskName 'Update CRL' -ErrorAction Stop
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to run CRL scheduled task $_" -Severity 'WARN'
+                                            Write-Output "Failed to run CRL scheduled task $_"
                                         }
 
                                         Write-Output 'Restarting CA service'
                                         Try {
                                             Restart-Service -Name 'certsvc' -ErrorAction Stop
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to restart CA service $_" -Severity 'WARN'
+                                            Write-Output "Failed to restart CA service $_"
                                         }
 
                                         Write-Output 'Setting Windows Firewall WinRM Public rule to allow VPC CIDR traffic'
                                         Try {
                                             Set-NetFirewallRule -Name 'WINRM-HTTP-In-TCP-PUBLIC' -RemoteAddress $VPCCIDR -ErrorAction Stop
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to allow WinRM traffic from VPC CIDR $_" -Severity 'WARN'
+                                            Write-Output "Failed to allow WinRM traffic from VPC CIDR $_"
                                         }
                                     }
 
@@ -1315,7 +1314,6 @@ Resources:
                                         $CredDelKey = 'CredentialsDelegation'
                                         $FreshCredKey = 'AllowFreshCredentials'
                                         $FreshCredKeyNTLM = 'AllowFreshCredentialsWhenNTLMOnly'
-                                        $ServiceName = $MyInvocation.MyCommand.Name
 
                                         Switch ($Action) {
                                             'Enable' {
@@ -1330,33 +1328,51 @@ Resources:
                                                     Exit 1
                                                 }
 
-                                                Write-Output 'Setting CredSSP registry entries'
                                                 $CredDelKeyPresent = Test-Path -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
                                                 If (-not $CredDelKeyPresent) {
+                                                    Write-Output 'Setting CredSSP registry entries'
                                                     Try {
                                                         $CredDelPath = New-Item -Path $RootKey -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-
-                                                        $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
-                                                        If (-not $FreshCredKeyPresent) {
-                                                            $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                                                        }
-
-                                                        $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
-                                                        If (-not $FreshCredKeyNTLMPresent) {
-                                                            $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                                                        }
-
-                                                        $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentials' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFresh' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentialsWhenNTLMOnly' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFreshNTLMOnly' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -PropertyType 'String' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -PropertyType 'String' -Force -ErrorAction Stop
                                                     } Catch [System.Exception] {
                                                         Write-Output "Failed to create CredSSP registry entries $_"
                                                         Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
                                                         Exit 1
                                                     }
+                                                }
+
+                                                $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
+                                                If (-not $FreshCredKeyPresent) {
+                                                    Try {
+                                                        $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                                                    } Catch [System.Exception] {
+                                                        Write-Output "Failed to create CredSSP registry entries $_"
+                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Exit 1
+                                                    }
+                                                }
+
+                                                $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
+                                                If (-not $FreshCredKeyNTLMPresent) {
+                                                    Try {
+                                                        $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                                                    } Catch [System.Exception] {
+                                                        Write-Output "Failed to create CredSSP registry entries $_"
+                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Exit 1
+                                                    }
+                                                }
+
+                                                Try {
+                                                    $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentials' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFresh' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentialsWhenNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFreshNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
+                                                } Catch [System.Exception] {
+                                                    Write-Output "Failed to create CredSSP registry entries $_"
+                                                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                    Exit 1
                                                 }
                                             }
                                             'Disable' {
@@ -1369,7 +1385,7 @@ Resources:
                                                     Exit 1
                                                 }
 
-                                                Write-Output 'Removing CredSSP registry entries'-Severity 'INFO'
+                                                Write-Output 'Removing CredSSP registry entries'
                                                 Try {
                                                     Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
                                                 } Catch [System.Exception] {
@@ -1567,7 +1583,7 @@ Resources:
                                             [Security.Principal.SecurityIdentifier]$IdentityReference = $Using:IdentityReference | Select-Object -ExpandProperty 'Value'
 
                                             $ArgumentList = $IdentityReference, $Using:ActiveDirectoryRights, $Using:AccessControlType, $Using:ObjectGuid, $Using:ActiveDirectorySecurityInheritance, $Using:InheritedObjectGuid
-                                            $ArgumentList = $ArgumentList.Where( { $_ -ne $Null })
+                                            $ArgumentList = $ArgumentList.Where({ $_ -ne $Null })
 
                                             Write-Output 'Creating ACL object'
                                             Try {
@@ -3538,7 +3554,7 @@ Resources:
                                         [Security.Principal.SecurityIdentifier]$IdentityReference = $IdentityReference | Select-Object -ExpandProperty 'Value'
 
                                         $ArgumentList = $IdentityReference, $ActiveDirectoryRights, $AccessControlType, $ObjectGuid, $ActiveDirectorySecurityInheritance, $InheritedObjectGuid
-                                        $ArgumentList = $ArgumentList.Where( { $_ -ne $Null })
+                                        $ArgumentList = $ArgumentList.Where({ $_ -ne $Null })
 
                                         Write-Output 'Creating ACL object'
                                         Try {
@@ -5564,7 +5580,6 @@ Resources:
                                             [Parameter(Mandatory = $true)][String]$VPCCIDR
                                         )
 
-                                        $ServiceName = $MyInvocation.MyCommand.Name
                                         $CompName = $env:COMPUTERNAME
                                         $Folders = @(
                                             'D:\Pki\Req',
@@ -5848,28 +5863,28 @@ Resources:
                                             $ScheduledTask = New-ScheduledTask -Action $ScheduledTaskAction -Principal $ScheduledTaskPrincipal -Trigger $ScheduledTaskTrigger -Settings $ScheduledTaskSettingsSet -Description 'Updates CRL to Local Pki Folder' -ErrorAction Stop
                                             $Null = Register-ScheduledTask 'Update CRL' -InputObject $ScheduledTask -ErrorAction Stop
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to register Update CRL scheduled task $_" -Severity 'WARN'
+                                            Write-Output "Failed to register Update CRL scheduled task $_"
                                         }
 
                                         Write-Output 'Running CRL scheduled task'
                                         Try {
                                             Start-ScheduledTask -TaskName 'Update CRL' -ErrorAction Stop
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to run CRL scheduled task $_" -Severity 'WARN'
+                                            Write-Output "Failed to run CRL scheduled task $_"
                                         }
 
                                         Write-Output 'Restarting CA service'
                                         Try {
                                             Restart-Service -Name 'certsvc' -ErrorAction Stop
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to restart CA service $_" -Severity 'WARN'
+                                            Write-Output "Failed to restart CA service $_"
                                         }
 
                                         Write-Output 'Setting Windows Firewall WinRM Public rule to allow VPC CIDR traffic'
                                         Try {
                                             Set-NetFirewallRule -Name 'WINRM-HTTP-In-TCP-PUBLIC' -RemoteAddress $VPCCIDR -ErrorAction Stop
                                         } Catch [System.Exception] {
-                                            Write-Output "Failed to allow WinRM traffic from VPC CIDR $_" -Severity 'WARN'
+                                            Write-Output "Failed to allow WinRM traffic from VPC CIDR $_"
                                         }
                                     }
 
@@ -5883,7 +5898,6 @@ Resources:
                                         $CredDelKey = 'CredentialsDelegation'
                                         $FreshCredKey = 'AllowFreshCredentials'
                                         $FreshCredKeyNTLM = 'AllowFreshCredentialsWhenNTLMOnly'
-                                        $ServiceName = $MyInvocation.MyCommand.Name
 
                                         Switch ($Action) {
                                             'Enable' {
@@ -5898,33 +5912,51 @@ Resources:
                                                     Exit 1
                                                 }
 
-                                                Write-Output 'Setting CredSSP registry entries'
                                                 $CredDelKeyPresent = Test-Path -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
                                                 If (-not $CredDelKeyPresent) {
+                                                    Write-Output 'Setting CredSSP registry entries'
                                                     Try {
                                                         $CredDelPath = New-Item -Path $RootKey -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-
-                                                        $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
-                                                        If (-not $FreshCredKeyPresent) {
-                                                            $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                                                        }
-
-                                                        $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
-                                                        If (-not $FreshCredKeyNTLMPresent) {
-                                                            $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                                                        }
-
-                                                        $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentials' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFresh' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentialsWhenNTLMOnly' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFreshNTLMOnly' -Value '1' -PropertyType 'Dword' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -PropertyType 'String' -Force -ErrorAction Stop
-                                                        $Null = New-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -PropertyType 'String' -Force -ErrorAction Stop
                                                     } Catch [System.Exception] {
                                                         Write-Output "Failed to create CredSSP registry entries $_"
                                                         Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
                                                         Exit 1
                                                     }
+                                                }
+
+                                                $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
+                                                If (-not $FreshCredKeyPresent) {
+                                                    Try {
+                                                        $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                                                    } Catch [System.Exception] {
+                                                        Write-Output "Failed to create CredSSP registry entries $_"
+                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Exit 1
+                                                    }
+                                                }
+
+                                                $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
+                                                If (-not $FreshCredKeyNTLMPresent) {
+                                                    Try {
+                                                        $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                                                    } Catch [System.Exception] {
+                                                        Write-Output "Failed to create CredSSP registry entries $_"
+                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Exit 1
+                                                    }
+                                                }
+
+                                                Try {
+                                                    $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentials' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFresh' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentialsWhenNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFreshNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
+                                                    $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
+                                                } Catch [System.Exception] {
+                                                    Write-Output "Failed to create CredSSP registry entries $_"
+                                                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                    Exit 1
                                                 }
                                             }
                                             'Disable' {
@@ -5937,7 +5969,7 @@ Resources:
                                                     Exit 1
                                                 }
 
-                                                Write-Output 'Removing CredSSP registry entries'-Severity 'INFO'
+                                                Write-Output 'Removing CredSSP registry entries'
                                                 Try {
                                                     Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
                                                 } Catch [System.Exception] {
@@ -6135,7 +6167,7 @@ Resources:
                                             [Security.Principal.SecurityIdentifier]$IdentityReference = $Using:IdentityReference | Select-Object -ExpandProperty 'Value'
 
                                             $ArgumentList = $IdentityReference, $Using:ActiveDirectoryRights, $Using:AccessControlType, $Using:ObjectGuid, $Using:ActiveDirectorySecurityInheritance, $Using:InheritedObjectGuid
-                                            $ArgumentList = $ArgumentList.Where( { $_ -ne $Null })
+                                            $ArgumentList = $ArgumentList.Where({ $_ -ne $Null })
 
                                             Write-Output 'Creating ACL object'
                                             Try {
