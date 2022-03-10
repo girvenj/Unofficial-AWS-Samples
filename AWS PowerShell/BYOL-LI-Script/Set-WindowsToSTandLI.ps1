@@ -3,7 +3,7 @@
     Set-WindowsToSTandLI.ps1
 
     .DESCRIPTION
-    This script will allow to convert an instances tenancy and licensing type from DH to ST and BYOL and LI.
+    This script will allow to convert an instances tenancy and licensing type from DH to ST and BYOL and LI
     
     It will:
         * Create an temporary inline IAM policy with the required permissions to convert the instance (https://docs.aws.amazon.com/license-manager/latest/userguide/conversion-prerequisites.html)

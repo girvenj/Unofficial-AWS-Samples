@@ -3,7 +3,20 @@
     Set-WindowsTenancyandLicense.ps1
 
     .DESCRIPTION
-    This script will allow to convert an instances tenancy and licensing type from DH to ST and BYOL and LI and vice versa.
+    This script will allow to convert an instances tenancy and licensing type from DH to ST and BYOL and LI and vice versa
+        It will:
+        * Create an temporary inline IAM policy with the required permissions to convert the instance (https://docs.aws.amazon.com/license-manager/latest/userguide/conversion-prerequisites.html)
+        * Stop the EC2 instance if it is running
+        * Convert the license type from 0800 (Windows BYOL) to 0002 (Windows License Included) or vice versa
+        * Convert the tenancy from dedicated to shared or to dedciated
+        * Remove the temporary inline IAM policy
+        * Start the EC2 instance
+
+    This script requires the following AWS Powershell modules:
+        * AWS.Tools.Common 
+        * AWS.Tools.EC2 
+        * AWS.Tools.IdentityManagement
+        * AWS.Tools.LicenseManager
 
     .EXAMPLE
     # Set Single Instance to Shared Tenancy and LI
@@ -17,6 +30,12 @@
 
     # Set Multiple Instances to Shared Tenancy and LI
     .\Set-WindowsTenancyandLicense.ps1 -DesiredTenancy 'Default' -DesiredUsageOperation 'WindowsServer-LI' -InstanceId (Get-Content -Path 'C:\Temp\instances.csv') -Region 'us-west-2'
+
+    .NOTES
+    Author: Jeremy J Girven
+    Author E-Mail: girvenj@amazon.com
+    Author Company: Amazon Web Services
+    Date: 03/10/2022
 #>
 
 [CmdletBinding()]
@@ -162,9 +181,17 @@ Foreach ($Instance in $InstanceId) {
         Write-Output 'Instance is already set to the desired affinity'
     }
 
-    Write-Output "Starting instance $Instance."
-    $Null = Start-EC2Instance -InstanceId $Instance -Force -Region $Region
-
     Write-Output "Removing inline IAM policy attached to the role $RoleName"
-    Remove-IAMRolePolicy -RoleName $RoleName -PolicyName 'BYOL-LM-Conversion-Inline-Policy' -Force
+    Try {
+        Remove-IAMRolePolicy -RoleName $RoleName -PolicyName 'BYOL-LM-Conversion-Inline-Policy' -Force -ErrorAction Stop
+    } Catch [System.Exception] {
+        Return "Failed to remove inline IAM policy attached to the role $RoleName $_"
+    }
+
+    Write-Output "Starting instance $Instance"
+    Try {
+        $Null = Start-EC2Instance -InstanceId $Instance -Force -Region $Region -ErrorAction Stop
+    } Catch [System.Exception] {
+        Return "Failed to start instance $Instance $_"
+    }
 }
