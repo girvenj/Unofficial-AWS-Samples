@@ -351,7 +351,7 @@ Function Set-PostDcPromo {
         
         $GuestPwStatus = Get-ADUser -Identity 'Guest' -Properties 'Passwordnotrequired', 'PasswordNeverExpires' -ErrorAction SilentlyContinue
         If ($GuestPwStatus.Passwordnotrequired -eq $True -or $GuestPwStatus.PasswordNeverExpires -eq $True ) {
-            Write-ToLog -InvocationName $ServiceName -LogData 'Setting -PasswordNeverExpires flag con Guest' -Severity 'INFO'
+            Write-ToLog -InvocationName $ServiceName -LogData 'Setting -PasswordNeverExpires flag on Guest' -Severity 'INFO'
             Try {
                 Set-ADUser 'Guest' -PasswordNeverExpires $False -ErrorAction Stop
             } Catch [System.Exception] {

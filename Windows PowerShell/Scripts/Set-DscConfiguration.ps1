@@ -587,7 +587,7 @@ Configuration SoftwareInstall {
         MsiInstaller EC2Launch {
             Ensure          = 'Present'  
             SoftwareName    = 'Amazon EC2Launch'
-            SoftwareVersion = '2.0.651.0'
+            SoftwareVersion = '2.0.698.0'
             URL             = 'https://s3.amazonaws.com/amazon-ec2launch-v2/windows/amd64/latest/AmazonEC2Launch.msi'
         }
         MsiInstaller KinesisAgent {
@@ -605,7 +605,7 @@ Configuration SoftwareInstall {
         ExeInstaller SSMAgent {
             Ensure          = 'Present'  
             SoftwareName    = 'Amazon SSM Agent'
-            SoftwareVersion = '3.1.804.0'
+            SoftwareVersion = '3.1.1004.0'
             URL             = 'https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe'
         }
         <#DotNetOfflineInstall DotNet48 {
