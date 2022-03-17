@@ -1885,29 +1885,6 @@ Resources:
                                     }
 
                                     Function Set-DscConfiguration {
-                                        Write-Output 'Getting the DSC encryption thumbprint to secure the MOF file'
-                                        Try {
-                                            $DscCertThumbprint = Get-ChildItem -Path 'cert:\LocalMachine\My' -ErrorAction Stop | Where-Object { $_.Subject -eq 'CN=DscEncryptCert' } | Select-Object -ExpandProperty 'Thumbprint'
-                                        } Catch [System.Exception] {
-                                            Write-Output "Failed to get DSC cert thumbprint $_"
-                                            Exit 1
-                                        }
-
-                                        Write-Output 'Creating configuration data block that has the certificate information for DSC configuration processing'
-                                        $ConfigurationData = @{
-                                            AllNodes = @(
-                                                @{
-                                                    NodeName = '*'
-                                                    CertificateFile = 'C:\Temp\publickeys\DscPublicKey.cer'
-                                                    Thumbprint = $DscCertThumbprint
-                                                    PSDscAllowDomainUser = $true
-                                                },
-                                                @{
-                                                    NodeName = 'localhost'
-                                                }
-                                            )
-                                        }
-
                                         Configuration ConfigInstance {
                                             Import-DscResource -ModuleName 'AuditPolicyDsc'
                                             Node LocalHost {
@@ -2501,15 +2478,13 @@ Resources:
                                     Invoke-DscStatusCheck
 
                                     Try {
-                                        $Version = Invoke-WebRequest 'https://github.com/awslabs/kinesis-agent-windows/releases/latest' -Headers @{"Accept" = "application/json" } -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'tag_name'
+                                        $Version = (Invoke-WebRequest 'https://s3-us-west-2.amazonaws.com/kinesis-agent-windows/downloads/packages.json' -Headers @{"Accept"="application/json"} -UseBasicParsing | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'Packages').Version[0]
                                     } Catch [System.Exception] {
                                         Write-Output "Failed to get latest KTAP version $_"
                                         Exit 1
                                     }
 
-                                    $VersionMinusV = $Version.Substring(1)
-
-                                    (New-Object -TypeName 'System.Net.WebClient').DownloadFile("https://github.com/awslabs/kinesis-agent-windows/releases/download/$Version/AWSKinesisTap.$VersionMinusV.msi", 'C:\Temp\AWSKinesisTap.msi')
+                                    (New-Object -TypeName 'System.Net.WebClient').DownloadFile("https://s3-us-west-2.amazonaws.com/kinesis-agent-windows/downloads/AWSKinesisTap.$Version.msi", 'C:\Temp\AWSKinesisTap.msi')
 
                                     Write-Output 'Installing KinesisTap'
                                     $DeployArguments = @('/quiet', '/l', 'C:\Temp\ktap-install-log.txt')
@@ -3875,29 +3850,6 @@ Resources:
                                     }
 
                                     Function Set-DscConfiguration {
-                                        Write-Output 'Getting the DSC encryption thumbprint to secure the MOF file'
-                                        Try {
-                                            $DscCertThumbprint = Get-ChildItem -Path 'cert:\LocalMachine\My' -ErrorAction Stop | Where-Object { $_.Subject -eq 'CN=DscEncryptCert' } | Select-Object -ExpandProperty 'Thumbprint'
-                                        } Catch [System.Exception] {
-                                            Write-Output "Failed to get DSC cert thumbprint $_"
-                                            Exit 1
-                                        }
-
-                                        Write-Output 'Creating configuration data block that has the certificate information for DSC configuration processing'
-                                        $ConfigurationData = @{
-                                            AllNodes = @(
-                                                @{
-                                                    NodeName = '*'
-                                                    CertificateFile = 'C:\Temp\publickeys\DscPublicKey.cer'
-                                                    Thumbprint = $DscCertThumbprint
-                                                    PSDscAllowDomainUser = $true
-                                                },
-                                                @{
-                                                    NodeName = 'localhost'
-                                                }
-                                            )
-                                        }
-
                                         Configuration ConfigInstance {
                                             Import-DscResource -ModuleName 'AuditPolicyDsc'
                                             Node LocalHost {
@@ -4491,15 +4443,13 @@ Resources:
                                     Invoke-DscStatusCheck
 
                                     Try {
-                                        $Version = Invoke-WebRequest 'https://github.com/awslabs/kinesis-agent-windows/releases/latest' -Headers @{"Accept" = "application/json" } -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'tag_name'
+                                        $Version = (Invoke-WebRequest 'https://s3-us-west-2.amazonaws.com/kinesis-agent-windows/downloads/packages.json' -Headers @{"Accept"="application/json"} -UseBasicParsing | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'Packages').Version[0]
                                     } Catch [System.Exception] {
                                         Write-Output "Failed to get latest KTAP version $_"
                                         Exit 1
                                     }
 
-                                    $VersionMinusV = $Version.Substring(1)
-
-                                    (New-Object -TypeName 'System.Net.WebClient').DownloadFile("https://github.com/awslabs/kinesis-agent-windows/releases/download/$Version/AWSKinesisTap.$VersionMinusV.msi", 'C:\Temp\AWSKinesisTap.msi')
+                                    (New-Object -TypeName 'System.Net.WebClient').DownloadFile("https://s3-us-west-2.amazonaws.com/kinesis-agent-windows/downloads/AWSKinesisTap.$Version.msi", 'C:\Temp\AWSKinesisTap.msi')
 
                                     Write-Output 'Installing KinesisTap'
                                     $DeployArguments = @('/quiet', '/l', 'C:\Temp\ktap-install-log.txt')
@@ -6442,11 +6392,11 @@ Resources:
                         $Params = @{
                             AdminPassword = '${AdminPassword}'
                             ServerNetBIOSName = 'ONPREM-DC01'
-                            DomainDNSName = '${DomainDNSName}'
-                            DomainNetBIOSName = '${DomainNetBIOSName}'
+                            DomainDNSName = '${OnpremDomainName}'
+                            DomainNetBIOSName = '${OnpremNetBIOSName}'
                             IntegrateFSxwSMMAD = '${IntegrateFSxwSMMAD}'
                             FSxwSMMADOU = '${FSxwSMMADOU}'
-                            MadDNSName = '${MadDNSName}'
+                            MadDNSName = '${MADDomainName}'
                             StackName = '${AWS::StackName}'
                             TrustDirection = '${TrustDirection}'
                             URLSuffix = '${AWS::URLSuffix}'
@@ -6454,14 +6404,7 @@ Resources:
                         }
                         Start-SSMAutomationExecution -DocumentName '${OnPremDomainControllerSsmAuto}' -Parameter $Params
                         </powershell>
-                    - AdminPassword: !Ref AdminPassword
-                      DomainDNSName: !Ref OnpremDomainName
-                      DomainNetBIOSName: !Ref OnpremNetBIOSName
-                      IntegrateFSxwSMMAD: !Ref IntegrateFSxwSMMAD
-                      FSxwSMMADOU: !Ref FSxwSMMADOU
-                      MadDNSName: !Ref MADDomainName
-                      TrustDirection: !Ref TrustDirection
-                      VPCCIDR: !GetAtt VPC.CidrBlock
+                    -  VPCCIDR: !GetAtt VPC.CidrBlock
     OnpremPkiInstance:
         Type: AWS::EC2::Instance
         CreationPolicy:
@@ -6504,8 +6447,8 @@ Resources:
                         <powershell>
                         $Params = @{
                             AdminPassword = '${AdminPassword}'
-                            DomainDNSName = '${DomainDNSName}'
-                            DomainNetBIOSName = '${DomainNetBIOSName}'
+                            DomainDNSName = '${OnpremDomainName}'
+                            DomainNetBIOSName = '${OnpremNetBIOSName}'
                             ServerNetBIOSName = 'ONPREM-PKI01'
                             StackName = '${AWS::StackName}'
                             URLSuffix = '${AWS::URLSuffix}'
@@ -6513,10 +6456,7 @@ Resources:
                         }
                         Start-SSMAutomationExecution -DocumentName '${OnpremPkiInstanceSSMAuto}' -Parameter $Params
                         </powershell>
-                    - AdminPassword: !Ref AdminPassword
-                      DomainDNSName: !Ref OnpremDomainName
-                      DomainNetBIOSName: !Ref OnpremNetBIOSName
-                      VPCCIDR: !GetAtt VPC.CidrBlock
+                    - VPCCIDR: !GetAtt VPC.CidrBlock
     FSxOnprem:
         Type: AWS::FSx::FileSystem
         Condition: YesIntegrateFSxwSMMAD
@@ -6606,11 +6546,11 @@ Resources:
                         <powershell>
                         $Params = @{
                             AdminPassword = '${AdminPassword}'
-                            DomainDNSName = '${DomainDNSName}'
-                            DomainNetBIOSName = '${DomainNetBIOSName}'
+                            DomainDNSName = '${MADDomainName}'
+                            DomainNetBIOSName = '${MADNetBIOSName}'
                             ServerNetBIOSName = 'MAD-MGMT01'
-                            MadDirectoryID = '${MadDirectoryID}'
-                            OnpremDomainDNSName = '${OnpremDomainDNSName}'
+                            MadDirectoryID = '${ManagedAD}'
+                            OnpremDomainDNSName = '${OnpremDomainName}'
                             StackName = '${AWS::StackName}'
                             TrustDirection = '${TrustDirection}'
                             URLSuffix = '${AWS::URLSuffix}'
@@ -6618,13 +6558,7 @@ Resources:
                         }
                         Start-SSMAutomationExecution -DocumentName '${MgmtInstanceSSMAuto}' -Parameter $Params
                         </powershell>
-                    - AdminPassword: !Ref AdminPassword
-                      DomainDNSName: !Ref MADDomainName
-                      DomainNetBIOSName: !Ref MADNetBIOSName
-                      MadDirectoryID: !Ref ManagedAD
-                      OnpremDomainDNSName : !Ref OnpremDomainName
-                      TrustDirection: !Ref TrustDirection
-                      VPCCIDR: !GetAtt VPC.CidrBlock
+                    - VPCCIDR: !GetAtt VPC.CidrBlock
 Outputs:
     MADManagementInstanceID:
         Description: MAD Management Instance ID
@@ -6637,10 +6571,10 @@ Outputs:
         Value: !Ref ManagedAD
     MADPrivateIP1:
         Description: MAD DNS IP 1
-        Value: !Select ["0", !GetAtt "ManagedAD.DnsIpAddresses"]
+        Value: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
     MADPrivateIP2:
         Description: MAD DNS IP 2
-        Value: !Select ["1", !GetAtt "ManagedAD.DnsIpAddresses"]
+        Value: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
     OnpremDomainControllerInstanceID:
         Description: Onprem Domain Controller Instance ID
         Value: !Ref OnPremDomainController

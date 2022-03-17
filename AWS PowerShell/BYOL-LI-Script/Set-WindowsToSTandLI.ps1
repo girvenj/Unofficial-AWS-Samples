@@ -21,7 +21,7 @@
 
     .EXAMPLE
     # Set Single Instance to Shared Tenancy and LI
-    .\Set-WindowsToSTandLI.ps1 -InstanceId 'i-03e357ab8aba94351' -Region 'us-west-2'
+    .\Set-WindowsToSTandLI.ps1 -InstanceId 'i-02e40c6b9120e5b78' -Region 'us-west-2'
 
     # Set Multiple Instances to Shared Tenancy and LI
     .\Set-WindowsToSTandLI.ps1 -InstanceId (Get-Content -Path 'C:\Temp\instances.csv') -Region 'us-west-2'
@@ -124,7 +124,7 @@ Foreach ($Instance in $InstanceId) {
     If ($Tenancy -ne 'default') {
         Write-Output "Setting instance $Instance tenancy to the desired value default"
         Try {
-            $LicenseConfigurationArn = Get-LICMLicenseSpecificationsForResourceList -ResourceArn "arn:aws:ec2:$($Region):$($OwnerAccount):instance/$($Instance)" -Region $Region | Select-Object -ExpandProperty 'LicenseConfigurationArn'
+            $LicenseConfigurationArn = Get-LICMLicenseSpecificationsForResourceList -ResourceArn "arn:aws:ec2:$($Region):$($OwnerAccount):instance/$($Instance)" -Region $Region -ErrorAction Stop | Select-Object -ExpandProperty 'LicenseConfigurationArn'
             $LicenseSpecification = New-Object -TypeName 'Amazon.LicenseManager.Model.LicenseSpecification'
             $LicenseSpecification.LicenseConfigurationArn = $LicenseConfigurationArn
             $Null = Update-LICMLicenseSpecificationsForResource -ResourceArn "arn:aws:ec2:$($Region):$($OwnerAccount):instance/$($Instance)" -RemoveLicenseSpecification $LicenseSpecification -Force -Region $Region -ErrorAction Stop
