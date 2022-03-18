@@ -286,6 +286,17 @@ Resources:
         - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
         - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMDirectoryServiceAccess
       Path: /
+      Policies:
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - ec2:RebootInstances
+                  - ec2:DeleteTags
+                  - ec2:CreateTags
+                Effect: Allow
+                Resource: "arn:aws:ec2:*:*:instance/*"
+          PolicyName: Inline-Policy
       RoleName: ec2-domain-join
       Tags:
         - Key: StackName
@@ -297,7 +308,7 @@ Resources:
       InstanceProfileName: ec2-domain-join
       Path: /
       Roles:
-        - Ref: InstanceRole
+        - Ref: SdjInstanceRole
   RDSRole:
     Type: AWS::IAM::Role
     Properties:
@@ -491,7 +502,7 @@ Resources:
                   (New-Object -TypeName 'System.Net.WebClient').DownloadFile('https://aka.ms/ssmsfullsetup', 'C:\Temp\SSMS-Setup.exe')
                   $ArgumentList = '/Quiet'
                   Try {
-                      $Process = Start-Process -FilePath 'C:\Temp\SSMS-Setup.exe' -ArgumentList $ArgumentList -NoNewWindow -Wait -ErrorAction Stop
+                      $Process = Start-Process -FilePath 'C:\Temp\SSMS-Setup.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait -ErrorAction Stop
                   } Catch [System.Exception] {
                       Write-Output "Failed to install SQL Server Management Studio $_"
                       #Exit 1
@@ -501,7 +512,7 @@ Resources:
                   (New-Object -TypeName 'System.Net.WebClient').DownloadFile('https://go.microsoft.com/fwlink/?linkid=866658', 'C:\Temp\SQL2019-SSEI-Expr.exe')             
                   $ArgumentList = '/ACTION=Download', '/HIDEPROGRESSBAR', '/MEDIATYPE=Core', '/MEDIAPATH=C:\Temp', '/QUIET'
                   Try {
-                      $Process = Start-Process -FilePath 'C:\Temp\SQL2019-SSEI-Expr.exe' -ArgumentList $ArgumentList -NoNewWindow -Wait -ErrorAction Stop
+                      $Process = Start-Process -FilePath 'C:\Temp\SQL2019-SSEI-Expr.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait -ErrorAction Stop
                   } Catch [System.Exception] {
                       Write-Output "Failed to install SQL Server Express $_"
                       #Exit 1
@@ -509,7 +520,7 @@ Resources:
 
                   $ArgumentList = '/q', '/x:C:\Temp\SQLEXPR_2019'
                   Try {
-                      $Process = Start-Process -FilePath 'C:\Temp\SQLEXPR_x64_ENU.exe' -ArgumentList $ArgumentList -NoNewWindow -Wait -ErrorAction Stop
+                      $Process = Start-Process -FilePath 'C:\Temp\SQLEXPR_x64_ENU.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait -ErrorAction Stop
                   } Catch [System.Exception] {
                       Write-Output "Failed to install SQL extract Server Express media $_"
                       #Exit 1
@@ -517,7 +528,7 @@ Resources:
 
                   $ArgumentList = '/ACTION=Install', '/QUIET', '/FEATURES=SQL', '/INSTANCENAME=SQLEXPRESS', '/IACCEPTSQLSERVERLICENSETERMS', '/SQLSVCACCOUNT="NT AUTHORITY\NETWORK SERVICE"', '/SQLSYSADMINACCOUNTS="administrators"', '/SKIPRULES="RebootRequiredCheck"' 
                   Try {
-                      $Process = Start-Process -FilePath 'C:\Temp\SQLEXPR_2019\Setup.exe' -ArgumentList $ArgumentList -NoNewWindow -Wait
+                      $Process = Start-Process -FilePath 'C:\Temp\SQLEXPR_2019\Setup.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait
                   } Catch [System.Exception] {
                       Write-Output "Failed to install SQL extract Server Express media $_"
                       #Exit 1

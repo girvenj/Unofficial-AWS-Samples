@@ -153,22 +153,22 @@ Resources:
             $source = '${NotePadUrl}'
             $destination = 'C:\temp\npp.Installer.x64.exe'
             Invoke-WebRequest -Uri $source -OutFile $destination -ErrorAction Stop
-            Start-Process -FilePath 'C:\temp\npp.Installer.x64.exe' -ArgumentList '/S' -Wait -NoNewWindow -ErrorAction Stop
+            Start-Process -FilePath 'C:\temp\npp.Installer.x64.exe' -ArgumentList '/S' -NoNewWindow -PassThru -Wait -ErrorAction Stop
 
             $source = '${AwsCliUrl}'
             $destination = 'C:\temp\AwsCli.msi'
             Invoke-WebRequest -Uri $source -OutFile $destination -ErrorAction Stop
-            Start-Process -FilePath 'msiexec.exe' -ArgumentList '/I C:\temp\AwsCli.msi /quiet' -Wait -NoNewWindow -ErrorAction Stop
+            Start-Process -FilePath 'msiexec.exe' -ArgumentList '/I C:\temp\AwsCli.msi /quiet' -NoNewWindow -PassThru -Wait -ErrorAction Stop
 
             $source = '${VSCodeUrl}'
             $destination = 'C:\temp\VsCode.exe'
             Invoke-WebRequest -Uri $source -OutFile $destination -ErrorAction Stop
-            Start-Process -FilePath 'C:\temp\VsCode.exe' -ArgumentList '/VERYSILENT /MERGETASKS=!runcode' -Wait -NoNewWindow -ErrorAction Stop
+            Start-Process -FilePath 'C:\temp\VsCode.exe' -ArgumentList '/VERYSILENT /MERGETASKS=!runcode' -NoNewWindow -PassThru -Wait -ErrorAction Stop
 
             $source = '${VSUrl}'
             $destination = 'C:\temp\vs_Community.exe'
             Invoke-WebRequest -Uri $source -OutFile $destination -ErrorAction Stop
-            Start-Process -FilePath 'C:\Temp\vs_Community.exe' -ArgumentList '--add Microsoft.VisualStudio.Workload.NetWeb --add Microsoft.VisualStudio.Workload.Azure --add Microsoft.VisualStudio.Workload.NetCoreTools --includeRecommended --quiet --norestart --wait' -Wait -NoNewWindow -ErrorAction Stop
+            Start-Process -FilePath 'C:\Temp\vs_Community.exe' -ArgumentList '--add Microsoft.VisualStudio.Workload.NetWeb --add Microsoft.VisualStudio.Workload.Azure --add Microsoft.VisualStudio.Workload.NetCoreTools --includeRecommended --quiet --norestart --wait' -NoNewWindow -PassThru -Wait -ErrorAction Stop
           } Catch [System.Exception] {
             cfn-signal.exe --success 'false' --stack ${AWS::StackId} --resource VSInstance --region ${AWS::Region}
             Exit 1

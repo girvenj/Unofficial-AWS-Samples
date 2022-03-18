@@ -245,7 +245,7 @@ Class AwsDriverPnPInstaller {
             $ArgumentList = "/delete-driver `"$InfFile`"", '/uninstall', '/reboot'
         }
 
-        $pnputilProc = Start-Process -FilePath 'pnputil.exe' -ArgumentList $ArgumentList -PassThru -Wait
+        $pnputilProc = Start-Process -FilePath 'pnputil.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait
     }
 }
 
@@ -373,7 +373,7 @@ Class ExeInstaller {
             $ArgumentList = '/uninstall', '/quiet', "/l*v `"$LogFilePath`""
         }
         
-        $Process = Start-Process -FilePath $InstallFile -ArgumentList $ArgumentList -NoNewWindow -Wait
+        $Process = Start-Process -FilePath $InstallFile -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait
         $Null
     }
 }
@@ -491,7 +491,7 @@ Class DotNetOfflineInstall {
             $ArgumentList = '/uninstall', '/q', "/log $LogFilePath"
         }
         
-        $Process = Start-Process -FilePath $InstallFile -ArgumentList $ArgumentList -NoNewWindow -Wait
+        $Process = Start-Process -FilePath $InstallFile -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait
         $Null
     }
 }
@@ -549,7 +549,7 @@ Class SetAdvAudit {
             Write-Verbose -Message "Disabling Active Directory advanced audititing $($This.CatName) and $($This.Setting)"
             $ArgumentList = '/set', "/subcategory:`"$CatName`"", '/success:disable', '/failure:disable'
         }  
-        $Process = Start-Process -FilePath 'Auditpol.exe' -ArgumentList $ArgumentList -NoNewWindow -Wait -PassThru
+        $Process = Start-Process -FilePath 'Auditpol.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait
         $Null
     }
 }
