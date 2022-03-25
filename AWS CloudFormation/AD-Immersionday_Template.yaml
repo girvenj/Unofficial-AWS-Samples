@@ -1,13 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Parameters:
-  AdminPassword:
-    AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
-    Default: P@ssword1
-    Description: Password for the Admin account (Also used to create the trust) The default is "P@ssw0rd"
-    MaxLength: '127'
-    MinLength: '7'
-    NoEcho: 'true'
-    Type: String
   AMI:
     Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -39,30 +31,18 @@ Parameters:
     MaxLength: '15'
     MinLength: '1'
     Type: String 
-  RDSPassword:
-    AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
-    Default: Passw0rd1
-    Description: Password for the RDS Instance. The default is "Passw0rd1"
-    MaxLength: '32'
-    MinLength: '8'
-    NoEcho: 'true'
-    Type: String
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
           default: Configuration
         Parameters:
-          - AdminPassword
           - AMI
           - MADDomainName
           - MADNetBIOSName
           - OnpremDomainName
           - OnpremNetBIOSName
-          - RDSPassword
     ParameterLabels:
-      AdminPassword:
-        default: Admin & Trusts Password
       AMI:
         default: SSM Parameter Value for Latest AMI ID
       MADDomainName:
@@ -73,8 +53,6 @@ Metadata:
         default: On-Premises Domain DNS Name
       OnpremNetBIOSName:
         default: On-Premises Domain NetBIOS Name
-      RDSPassword:
-        default: Amazon RDS SQL Instance Password
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -200,6 +178,16 @@ Resources:
               - Action: cloudformation:SignalResource
                 Effect: Allow
                 Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+              - Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Effect: Allow                  
+                Resource:
+                  - !Ref MadAdminSecret
+                  - !Ref OnPremAdministratorSecret
+                  - !Ref OnPremAltAdminSecret
+                  - !Ref OnPremRestoreModeSecret
+                  - !Ref RdsAdminSecret
               - Action: ssm:SendCommand
                 Effect: Allow
                 Resource:
@@ -328,6 +316,56 @@ Resources:
         - Key: StackName
           Value:
             Ref: AWS::StackName
+  MadAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub MadAdminSecret
+      Description: Admin Password for AWS Managed Microsoft AD 
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "Admin"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'
+  OnPremAdministratorSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub OnPremAdministratorSecret
+      Description: Administrator Password for Onpremises AD
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "Administrator"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'        
+  OnPremAltAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub OnPremAltAdminSecret
+      Description: Alternate Admin Password for Onpremises AD
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "Admin"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'  
+  OnPremRestoreModeSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub OnPremRestoreModeSecret
+      Description: Restore Mode Password for Onpremises AD
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "Administrator"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'      
+  RdsAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub RdsAdminSecret
+      Description: SQL Password for Amazon RDS 
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'                     
   ManagedAD:
     Type: AWS::DirectoryService::MicrosoftAD
     Properties:
@@ -335,7 +373,7 @@ Resources:
       Edition: Enterprise
       EnableSso: false
       Name: !Ref MADDomainName
-      Password: !Ref AdminPassword
+      Password: !Sub '{{resolve:secretsmanager:${MadAdminSecret}:SecretString:password}}'
       ShortName: !Ref MADNetBIOSName
       VpcSettings:
         SubnetIds:
@@ -389,8 +427,8 @@ Resources:
         schemaVersion: "0.3"
         description: Deploy AD with SSM Automation
         parameters:
-          AdminPassword:
-            description: Password for the Admin account (Also used to create the trust)
+          ADAltUserSecParamName:
+            description: AWS Secrets Parameter Name for the account that will be added as Domain Administrator. This is separate from the built-in Administrator account
             type: String
           DomainDNSName:
             description: Fully qualified domain name (FQDN) of the forest root domain e.g. example.com
@@ -545,6 +583,37 @@ Resources:
                 - "{{mgmtInstanceId.InstanceId}}"
               Parameters:
                 commands: |-
+                  Function Get-SecretInfo {
+                      [CmdletBinding()]
+                      Param (
+                          [Parameter(Mandatory = $True)][String]$Domain,
+                          [Parameter(Mandatory = $True)][String]$SecretArn
+                      )
+
+                      Write-Output "Getting $SecretArn Secret"
+                      Try {
+                          $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                      } Catch [System.Exception] {
+                          Write-Output "Failed to get $SecretArn Secret $_"
+                          Exit 1
+                      }
+
+                      Write-Output 'Creating PSCredential object from Secret'
+                      $Username = $SecretContent.username
+                      $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                      $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                      $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                      $Output = [PSCustomObject][Ordered]@{
+                          'Credentials'       = $Credentials
+                          'DomainCredentials' = $DomainCredentials
+                          'Username'          = $Username
+                          'UserPassword'      = $UserPassword
+                      }
+
+                      Return $Output
+                  }
+
                   Function Invoke-PreConfig {
                       Write-Output 'Temporarily disabling Windows Firewall'
                       Try {
@@ -766,12 +835,11 @@ Resources:
                       ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
                   }
 
-                  $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                  $AltAdminCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
+                  $AltSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAltUserSecParamName}}'
                   Invoke-PreConfig
                   Invoke-LcmConfig
                   $EniConfig = Get-EniConfig
-                  Set-DscConfiguration -DaCredentials $AltAdminCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -ExistingDcIP01 '{{ExistingDcIP01}}' -ExistingDcIP02 '{{ExistingDcIP02}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{MgmtServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
+                  Set-DscConfiguration -DaCredentials $AltSecret.DomainCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -ExistingDcIP01 '{{ExistingDcIP01}}' -ExistingDcIP02 '{{ExistingDcIP02}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{MgmtServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
             nextStep: runMgmtMof
           - name: runMgmtMof
             action: aws:runCommand
@@ -928,9 +996,9 @@ Resources:
             - |
               <powershell>
               $Params = @{
-                  AdminPassword         = '${AdminPassword}'
-                  DomainDNSName         = '${DomainDNSName}'
-                  DomainNetBIOSName     = '${DomainNetBIOSName}'
+                  ADAltUserSecParamName = '${MadAdminSecret}'
+                  DomainDNSName         = '${MADDomainName}'
+                  DomainNetBIOSName     = '${MADNetBIOSName}'
                   ExistingDcIP01        = '${ExistingDcIP01}'
                   ExistingDcIP02        = '${ExistingDcIP02}'
                   MgmtServerNetBIOSName = 'MAD-MGMT01'
@@ -940,10 +1008,7 @@ Resources:
               }
               Start-SSMAutomationExecution -DocumentName '${MgmtInstanceSSMAuto}' -Parameter $Params
               </powershell>
-            - AdminPassword: !Ref AdminPassword
-              DomainDNSName: !Ref MADDomainName
-              DomainNetBIOSName: !Ref MADNetBIOSName
-              ExistingDcIP01: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
+            - ExistingDcIP01: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
               ExistingDcIP02: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
               VPCCIDR: !GetAtt VPC.CidrBlock
   OnPremDomainControllerSsmAuto:
@@ -953,6 +1018,12 @@ Resources:
         schemaVersion: "0.3"
         description: Deploy AD with SSM Automation
         parameters:
+          ADAdminSecParamName:
+            description: AWS Secrets Parameter Name that has Password and User namer for the built-in administrator
+            type: String
+          ADAltUserSecParamName:
+            description: AWS Secrets Parameter Name for the account that will be added as Domain Administrator. This is separate from the built-in Administrator account
+            type: String
           ADServer1NetBIOSName:
             description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
             type: String
@@ -962,8 +1033,8 @@ Resources:
           DomainNetBIOSName:
             description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. EXAMPLE
             type: String
-          AdminPassword:
-            description: Password for the Admin account (Also used to create the trust)
+          RestoreModeSecParamName:
+            description: AWS Secrets Parameter Name for the Active Directory Restore Mode Password
             type: String
           StackName:
             description: Stack Name Input for cfn resource signal
@@ -1070,6 +1141,37 @@ Resources:
                 - "{{dc1InstanceId.InstanceId}}"
               Parameters:
                 commands: |-
+                  Function Get-SecretInfo {
+                      [CmdletBinding()]
+                      Param (
+                          [Parameter(Mandatory = $True)][String]$Domain,
+                          [Parameter(Mandatory = $True)][String]$SecretArn
+                      )
+
+                      Write-Output "Getting $SecretArn Secret"
+                      Try {
+                          $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                      } Catch [System.Exception] {
+                          Write-Output "Failed to get $SecretArn Secret $_"
+                          Exit 1
+                      }
+
+                      Write-Output 'Creating PSCredential object from Secret'
+                      $Username = $SecretContent.username
+                      $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                      $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                      $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                      $Output = [PSCustomObject][Ordered]@{
+                          'Credentials'       = $Credentials
+                          'DomainCredentials' = $DomainCredentials
+                          'Username'          = $Username
+                          'UserPassword'      = $UserPassword
+                      }
+
+                      Return $Output
+                  }
+
                   Function Invoke-PreConfig {
                       Write-Output 'Temporarily disabling Windows Firewall'
                       Try {
@@ -1394,14 +1496,13 @@ Resources:
                       ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
                   }
 
-                  $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                  $AltAdminCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
-                  $DaCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Administrator', $UserPassword)
-                  $RestoreModeCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('Administrator', $UserPassword)
+                  $DaSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAdminSecParamName}}'
+                  $RmSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{RestoreModeSecParamName}}'
+                  $AltSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAltUserSecParamName}}'
                   Invoke-PreConfig
                   Invoke-LcmConfig
                   $EniConfig = Get-EniConfig
-                  Set-DscConfiguration -AltAdminCredentials $AltAdminCredentials -AltAdminUserName 'Admin' -DaCredentials $DaCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ADServer1NetBIOSName}}' -LaCredentials $RestoreModeCredentials -MacAddress $EniConfig.MacAddress -RestoreModeCredentials $RestoreModeCredentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
+                  Set-DscConfiguration -AltAdminCredentials $AltSecret.Credentials -AltAdminUserName $AltSecret.Username -DaCredentials $DaSecret.DomainCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ADServer1NetBIOSName}}' -LaCredentials $DaSecret.Credentials -MacAddress $EniConfig.MacAddress -RestoreModeCredentials $RmSecret.Credentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
                 CloudWatchLogGroupName: !Sub /aws/AD-ID/${AWS::StackName}
@@ -1796,20 +1897,19 @@ Resources:
             - |
               <powershell>
               $Params = @{
-                  AdminPassword         = '${AdminPassword}'
-                  ADServer1NetBIOSName  = 'ONPREM-DC01'
-                  DomainDNSName         = '${DomainDNSName}'
-                  DomainNetBIOSName     = '${DomainNetBIOSName}'
-                  StackName             = '${AWS::StackName}'
-                  URLSuffix             = '${AWS::URLSuffix}'
-                  VPCCIDR               = '${VPCCIDR}'
+                  ADAdminSecParamName     = '${OnPremAdministratorSecret}'
+                  ADAltUserSecParamName   = '${OnPremAltAdminSecret}'
+                  ADServer1NetBIOSName    = 'ONPREM-DC01'
+                  DomainDNSName           = '${OnpremDomainName}'
+                  DomainNetBIOSName       = '${OnpremNetBIOSName}'
+                  RestoreModeSecParamName = '${OnPremRestoreModeSecret}'
+                  StackName               = '${AWS::StackName}'
+                  URLSuffix               = '${AWS::URLSuffix}'
+                  VPCCIDR                 = '${VPCCIDR}'
               }
               Start-SSMAutomationExecution -DocumentName '${OnPremDomainControllerSsmAuto}' -Parameter $Params
               </powershell>
-            - AdminPassword: !Ref AdminPassword
-              DomainDNSName: !Ref OnpremDomainName
-              DomainNetBIOSName: !Ref OnpremNetBIOSName
-              VPCCIDR: !GetAtt VPC.CidrBlock
+            - VPCCIDR: !GetAtt VPC.CidrBlock
   OnPremDomainControllerIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -1846,7 +1946,7 @@ Resources:
       EngineVersion: 15.00.4073.23.v1
       LicenseModel: license-included
       MasterUsername: admin
-      MasterUserPassword: !Ref RDSPassword
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RdsAdminSecret}:SecretString:password}}'
       StorageType: gp2
       VPCSecurityGroups:
         - !Ref DomainMemberSG
