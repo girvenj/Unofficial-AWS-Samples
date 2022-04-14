@@ -66,6 +66,12 @@ Foreach ($Instance in $InstanceId) {
         Return "Unable to get instance information $_"
     }
 
+    $InstanceFamily = ($InstanceDetails | Select-Object -ExpandProperty 'Instances' | Select-Object -ExpandProperty 'InstanceType' | Select-Object -ExpandProperty 'Value').Split('.')[0]
+
+    if ($InstanceFamily -eq 't3') {
+        Return 'For T3 instances, you cannot change the tenancy from dedicated to host, or from host to dedicated. Attempting to make one of these unsupported tenancy changes results in the InvalidTenancy error code.'
+    }
+
     $Tenancy = $InstanceDetails | Select-Object -ExpandProperty 'Instances' | Select-Object -ExpandProperty 'Placement' | Select-Object -ExpandProperty 'Tenancy' | Select-Object -ExpandProperty 'Value'
     $IamInstanceProfileArn = $InstanceDetails | Select-Object -ExpandProperty 'Instances' | Select-Object -ExpandProperty 'IamInstanceProfile' | Select-Object -ExpandProperty 'Arn'
     $CurrentUsageOperationValue = ($InstanceDetails | Select-Object -ExpandProperty 'Instances' | Select-Object -ExpandProperty 'UsageOperation').split(':')[1]

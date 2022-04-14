@@ -659,11 +659,10 @@ Function Set-CredSSP {
     # Variables
     #==================================================
 
-    $RootKey = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows'
+    $RootKey = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows'
     $CredDelKey = 'CredentialsDelegation'
     $FreshCredKey = 'AllowFreshCredentials'
     $FreshCredKeyNTLM = 'AllowFreshCredentialsWhenNTLMOnly'
-    $ServiceName = $MyInvocation.MyCommand.Name
 
     #==================================================
     # Main
@@ -672,48 +671,46 @@ Function Set-CredSSP {
     Switch ($Action) {
         'Enable' {
             Write-ToLog -InvocationName $ServiceName -LogData 'Enabling CredSSP' -Severity 'INFO'
-            Try {
-                $Null = Enable-WSManCredSSP -Role 'Client' -DelegateComputer '*' -Force -ErrorAction Stop
-                $Null = Enable-WSManCredSSP -Role 'Server' -Force -ErrorAction Stop
-            } Catch [System.Exception] {
-                Write-ToLog -InvocationName $ServiceName -LogData "Failed to enable CredSSP $_" -Severity 'ERROR'
-                $Null = Disable-WSManCredSSP -Role 'Client' -ErrorAction SilentlyContinue
-                $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
-                Exit 1
-            }
-
-            $CredDelKeyPresent = Test-Path -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
+            $CredDelKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
             If (-not $CredDelKeyPresent) {
-                Write-ToLog -InvocationName $ServiceName -LogData 'Setting CredSSP registry entries' -Severity 'INFO'
+                Write-ToLog -InvocationName $ServiceName -LogData "Setting CredSSP registry entry $CredDelKey" -Severity 'INFO'
                 Try {
-                    $CredDelPath = New-Item -Path $RootKey -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                    $CredDelPath = New-Item -Path "Registry::$RootKey" -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                 } Catch [System.Exception] {
-                    Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entries $_" -Severity 'ERROR'
-                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                    Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entry $CredDelKey $_" -Severity 'ERROR'
+                    Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                     Exit 1
                 }
+            } Else {
+                $CredDelPath = Join-Path -Path $RootKey -ChildPath $CredDelKey
             }
 
             $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
             If (-not $FreshCredKeyPresent) {
+                Write-ToLog -InvocationName $ServiceName -LogData "Setting CredSSP registry entry $FreshCredKey" -Severity 'INFO'
                 Try {
                     $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                 } Catch [System.Exception] {
-                    Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entries $_" -Severity 'ERROR'
-                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                    Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entry $FreshCredKey $_" -Severity 'ERROR'
+                    Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                     Exit 1
                 }
+            } Else {
+                $FreshCredKeyPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKey
             }
 
             $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
             If (-not $FreshCredKeyNTLMPresent) {
+                Write-ToLog -InvocationName $ServiceName -LogData "Setting CredSSP registry entry $FreshCredKeyNTLM" -Severity 'INFO'
                 Try {
                     $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                 } Catch [System.Exception] {
-                    Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entries $_" -Severity 'ERROR'
-                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                    Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entry $FreshCredKeyNTLM $_" -Severity 'ERROR'
+                    Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                     Exit 1
                 }
+            } Else {
+                $FreshCredKeyNTLMPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKeyNTLM
             }
 
             Try {
@@ -724,8 +721,18 @@ Function Set-CredSSP {
                 $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
                 $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
             } Catch [System.Exception] {
-                Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry entries $_" -Severity 'ERROR'
-                Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                Write-ToLog -InvocationName $ServiceName -LogData "Failed to create CredSSP registry properties $_" -Severity 'ERROR'
+                Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
+                Exit 1
+            }
+
+            Try {
+                $Null = Enable-WSManCredSSP -Role 'Client' -DelegateComputer '*' -Force -ErrorAction Stop
+                $Null = Enable-WSManCredSSP -Role 'Server' -Force -ErrorAction Stop
+            } Catch [System.Exception] {
+                Write-ToLog -InvocationName $ServiceName -LogData "Failed to enable CredSSP $_" -Severity 'ERROR'
+                $Null = Disable-WSManCredSSP -Role 'Client' -ErrorAction SilentlyContinue
+                $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
                 Exit 1
             }
         }
@@ -739,9 +746,9 @@ Function Set-CredSSP {
                 Exit 1
             }
 
-            Write-ToLog -InvocationName $ServiceName -LogData 'Removing CredSSP registry entries'-Severity 'INFO'
+            Write-ToLog -InvocationName $ServiceName -LogData 'Removing CredSSP registry entries' -Severity 'INFO'
             Try {
-                Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
             } Catch [System.Exception] {
                 Write-ToLog -InvocationName $ServiceName -LogData "Failed to remove CredSSP registry entries $_" -Severity 'ERROR'
                 Exit 1

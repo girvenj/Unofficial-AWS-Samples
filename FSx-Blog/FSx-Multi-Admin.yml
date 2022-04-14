@@ -8,14 +8,6 @@ Description: >-
     5.	(1) Amazon EC2 Instance (t3.large, 60Gb (C:) GP3, 10GB (D:)) joined to MAD w/ AD Mgmt tools installed
     6.  (2) Single AZ Amazon FSX for Windows Servers joined to MAD using the "Self-managed Microsoft Active Directory" Windows authentication option (32GB SSD and 16 MB/s Tcap)
 Parameters:
-    AdminPassword:
-        AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
-        Default: P@ssw0rd
-        Description: Password for the Admin and Administrator accounts (Also used to create the trust)
-        MaxLength: "127"
-        MinLength: "7"
-        NoEcho: "true"
-        Type: String
     AMI:
         Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
@@ -23,14 +15,6 @@ Parameters:
     FSxOU:
         Default: 'OU=corp,DC=corp,DC=example,DC=com'
         Description: Parent DN for Amazon FSX for Windows OU
-        Type: String
-    FSxPassword:
-        AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
-        Default: P@ssw0rd
-        Description: Password for the FSx service account password
-        MaxLength: "127"
-        MinLength: "7"
-        NoEcho: "true"
         Type: String
     MADDomainName:
         AllowedPattern: ^([a-zA-Z0-9]+[\\.-])+([a-zA-Z0-9])+$
@@ -52,7 +36,6 @@ Metadata:
             - Label:
                   default: Main Configuration
               Parameters:
-                  - AdminPassword
                   - AMI
                   - MADDomainName
                   - MADNetBIOSName
@@ -62,8 +45,6 @@ Metadata:
                   - FSxOU
                   - FSxPassword
         ParameterLabels:
-            AdminPassword:
-                default: Admin & Trusts Password
             AMI:
                 default: SSM Parameter Value for Latest AMI ID
             FSxOU:
@@ -177,6 +158,26 @@ Resources:
             InternetGatewayId:
                 Ref: VPCIGW
             VpcId: !Ref VPC
+    MadAdminSecret:
+        Type: AWS::SecretsManager::Secret
+        Properties:
+            Name: !Sub MadAdminSecret-${AWS::StackName}
+            Description: Password for AWS Managed Microsoft AD
+            GenerateSecretString:
+                SecretStringTemplate: '{"username": "Admin"}'
+                GenerateStringKey: 'password'
+                PasswordLength: 30
+                ExcludeCharacters: '"@/\'
+    FSxServiceAccountSecret:
+        Type: AWS::SecretsManager::Secret
+        Properties:
+            Name: !Sub FSxServiceAccountSecret-${AWS::StackName}
+            Description: Password for FSx Service Account
+            GenerateSecretString:
+                SecretStringTemplate: '{"username": "Administrator"}'
+                GenerateStringKey: 'password'
+                PasswordLength: 30
+                ExcludeCharacters: '"@/\'
     InstanceRole:
         Type: AWS::IAM::Role
         Properties:
@@ -199,6 +200,13 @@ Resources:
                           - Action: cloudformation:SignalResource
                             Effect: Allow
                             Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+                          - Action:
+                                - secretsmanager:GetSecretValue
+                                - secretsmanager:DescribeSecret
+                            Effect: Allow                  
+                            Resource:
+                                - !Ref MadAdminSecret
+                                - !Ref FSxServiceAccountSecret
                           - Action: ssm:SendCommand
                             Effect: Allow
                             Resource:
@@ -264,9 +272,12 @@ Resources:
                 schemaVersion: "0.3"
                 description: Deploy Management Instance with PKI using SSM Automation
                 parameters:
-                    AdminPassword:
+                    MadAdminSecret:
                         description: Password for the Admin account (Also used to create the trust)
                         type: String
+                    FSxServiceAccountSecret:
+                        description: Password for the Admin account (Also used to create the trust)
+                        type: String                        
                     DomainDNSName:
                         description: Fully qualified domain name (FQDN) of the forest root domain e.g. example.com
                         type: String
@@ -537,6 +548,37 @@ Resources:
                               - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
+                                    Function Get-SecretInfo {
+                                        [CmdletBinding()]
+                                        Param (
+                                            [Parameter(Mandatory = $True)][String]$Domain,
+                                            [Parameter(Mandatory = $True)][String]$SecretArn
+                                        )
+
+                                        Write-Output "Getting $SecretArn Secret"
+                                        Try {
+                                            $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get $SecretArn Secret $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating PSCredential object from Secret'
+                                        $Username = $SecretContent.username
+                                        $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                                        $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                                        $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                                        $Output = [PSCustomObject][Ordered]@{
+                                            'Credentials'       = $Credentials
+                                            'DomainCredentials' = $DomainCredentials
+                                            'Username'          = $Username
+                                            'UserPassword'      = $UserPassword
+                                        }
+
+                                        Return $Output
+                                    }
+
                                     Function Get-EniConfig {
                                         Write-Output 'Getting network configuration'
                                         Try {
@@ -712,10 +754,9 @@ Resources:
                                         }
                                     }
 
-                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                                    $AltAdminCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
+                                    $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{MadAdminSecret}}'
                                     $EniConfig = Get-EniConfig
-                                    Set-DscConfiguration -DaCredentials $AltAdminCredentials -DnsIp1 '{{MadDcIP01}}' -DnsIp2 '{{MadDcIP02}}' -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
+                                    Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DnsIp1 '{{MadDcIP01}}' -DnsIp2 '{{MadDcIP02}}' -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
                                     Start-DscConfiguration 'C:\Temp\ConfigInstance' -Wait -Verbose -Force
                                     Invoke-DscStatusCheck
                           CloudWatchOutputConfig:
@@ -731,6 +772,37 @@ Resources:
                               - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
+                                    Function Get-SecretInfo {
+                                        [CmdletBinding()]
+                                        Param (
+                                            [Parameter(Mandatory = $True)][String]$Domain,
+                                            [Parameter(Mandatory = $True)][String]$SecretArn
+                                        )
+
+                                        Write-Output "Getting $SecretArn Secret"
+                                        Try {
+                                            $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get $SecretArn Secret $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating PSCredential object from Secret'
+                                        $Username = $SecretContent.username
+                                        $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                                        $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                                        $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                                        $Output = [PSCustomObject][Ordered]@{
+                                            'Credentials'       = $Credentials
+                                            'DomainCredentials' = $DomainCredentials
+                                            'Username'          = $Username
+                                            'UserPassword'      = $UserPassword
+                                        }
+
+                                        Return $Output
+                                    }
+
                                     Function Invoke-Cleanup {
                                         [CmdletBinding()]
                                         Param (
@@ -902,23 +974,24 @@ Resources:
                                         }
                                     }
 
-                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                                    $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
-                                    
+                                    $Credentials = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{MadAdminSecret}}').DomainCredentials
+
                                     $DomainController = Get-ADDomainController -ErrorAction Stop | Select-Object -ExpandProperty 'HostName'
-                                    
+
+                                    $SvcPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{FSxServiceAccountSecret}}').UserPassword
+
                                     $FSxDeployments = @(
                                         @{
                                             AdminGroupName = 'FSxAdmins-A'
                                             OUName         = 'FSx-A'
                                             SvcAccountName = 'FSxServiceAccount-A'
-                                            SvcAccountPw   = '{{AdminPassword}}' | ConvertTo-SecureString -AsPlainText -Force
+                                            SvcAccountPw   = $SvcPassword
                                         },
                                         @{
                                             AdminGroupName = 'FSxAdmins-B'
                                             OUName         = 'FSx-B'
                                             SvcAccountName = 'FSxServiceAccount-B'
-                                            SvcAccountPw   = '{{AdminPassword}}' | ConvertTo-SecureString -AsPlainText -Force
+                                            SvcAccountPw   = $SvcPassword 
                                         }
                                     )
 
@@ -1110,7 +1183,7 @@ Resources:
             Edition: Enterprise
             EnableSso: false
             Name: !Ref MADDomainName
-            Password: !Ref AdminPassword
+            Password: !Sub '{{resolve:secretsmanager:${MadAdminSecret}:SecretString:password}}'
             ShortName: !Ref MADNetBIOSName
             VpcSettings:
                 SubnetIds:
@@ -1158,24 +1231,21 @@ Resources:
                     - |
                         <powershell>
                         $Params = @{
-                            AdminPassword = '${AdminPassword}'
-                            DomainDNSName = '${DomainDNSName}'
-                            DomainNetBIOSName = '${DomainNetBIOSName}'
-                            ServerNetBIOSName = 'MAD-MGMT01'
-                            MadDirectoryID = '${MadDirectoryID}'
+                            DomainDNSName = '${MADDomainName}'
+                            DomainNetBIOSName = '${MADNetBIOSName}'
+                            FSxServiceAccountSecret = '${FSxServiceAccountSecret}'
+                            MadAdminSecret = '${MadAdminSecret}'
+                            MadDirectoryID = '${ManagedAD}'
                             MadDcIP01 = '${MadDcIP01}'
                             MadDcIP02 = '${MadDcIP02}'
+                            ServerNetBIOSName = 'MAD-MGMT01'
                             StackName = '${AWS::StackName}'
                             URLSuffix = '${AWS::URLSuffix}'
                             VPCCIDR = '${VPCCIDR}'
                         }
                         Start-SSMAutomationExecution -DocumentName '${MgmtInstanceSSMAuto}' -Parameter $Params
                         </powershell>
-                    - AdminPassword: !Ref AdminPassword
-                      DomainDNSName: !Ref MADDomainName
-                      DomainNetBIOSName: !Ref MADNetBIOSName
-                      MadDirectoryID: !Ref ManagedAD
-                      MadDcIP01: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
+                    - MadDcIP01: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
                       MadDcIP02: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
                       VPCCIDR: !GetAtt VPC.CidrBlock
     FSxA:
@@ -1201,7 +1271,7 @@ Resources:
                   DomainName: !Ref MADDomainName
                   FileSystemAdministratorsGroup: FSxAdmins-A
                   OrganizationalUnitDistinguishedName: !Join [ ',', [ OU=FSx-A, !Ref FSxOU ] ]
-                  Password: !Ref FSxPassword
+                  Password: !Sub '{{resolve:secretsmanager:${FSxServiceAccountSecret}:SecretString:password}}'
                   UserName: FSxServiceAccount-A
                 ThroughputCapacity: 16
             Tags:
@@ -1230,13 +1300,16 @@ Resources:
                   DomainName: !Ref MADDomainName
                   FileSystemAdministratorsGroup: FSxAdmins-B
                   OrganizationalUnitDistinguishedName: !Join [ ',', [ OU=FSx-B, !Ref FSxOU ] ]
-                  Password: !Ref FSxPassword
+                  Password: !Sub '{{resolve:secretsmanager:${FSxServiceAccountSecret}:SecretString:password}}'
                   UserName: FSxServiceAccount-B
                 ThroughputCapacity: 16
             Tags:
                 - Key: Name
                   Value: FSxDeploymentB
 Outputs:
+    MADAdminSecretArn:
+        Description: MAD Admin Account Secret ARN
+        Value: !Ref MadAdminSecret
     MADManagementInstanceID:
         Description: MAD Management Instance ID
         Value: !Ref MgmtInstance
@@ -1255,3 +1328,6 @@ Outputs:
     DomainMemberSGID:
         Description: Domain Members Security Group ID
         Value: !Ref DomainMembersSG
+    FSxServiceAccountSecretArn:
+        Description: FSx Service Account Secret ARN
+        Value: !Ref FSxServiceAccountSecret        

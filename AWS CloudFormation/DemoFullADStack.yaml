@@ -16,14 +16,6 @@ Description: >-
     8.	Opt: (1) Single AZ Amazon FSX for Windows Server joined to MAD (32GB SSD and 16 MB/s Tcap)
     9.	Opt: (1) Single AZ Amazon FSX for Windows Server joined to self-managed AD (32GB SSD and 16 MB/s Tcap)
 Parameters:
-    AdminPassword:
-        AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
-        Default: P@ssw0rd
-        Description: Password for the Admin and Administrator accounts (Also used to create the trust)
-        MaxLength: "127"
-        MinLength: "7"
-        NoEcho: "true"
-        Type: String
     AMI:
         Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
@@ -81,14 +73,6 @@ Parameters:
         MaxLength: "15"
         MinLength: "1"
         Type: String
-    RDSPassword:
-        AllowedPattern: (?=^.{6,255}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
-        Default: Passw0rd1
-        Description: Password for the RDS Instance.
-        MaxLength: "32"
-        MinLength: "8"
-        NoEcho: "true"
-        Type: String
     TrustDirection:
         AllowedValues:
             - Two-Way
@@ -102,7 +86,6 @@ Metadata:
             - Label:
                   default: Main Configuration
               Parameters:
-                  - AdminPassword
                   - AMI
                   - MADDomainName
                   - MADNetBIOSName
@@ -113,13 +96,10 @@ Metadata:
                   default: Add-Ons
               Parameters:
                   - IntegrateRDSwMAD
-                  - RDSPassword
                   - IntegrateFSxwMAD
                   - IntegrateFSxwSMMAD
                   - FSxwSMMADOU
         ParameterLabels:
-            AdminPassword:
-                default: Admin & Trusts Password
             AMI:
                 default: SSM Parameter Value for Latest AMI ID
             IntegrateFSxwMAD:
@@ -138,8 +118,6 @@ Metadata:
                 default: On-Premises Domain DNS Name
             OnpremNetBIOSName:
                 default: On-Premises Domain NetBIOS Name
-            RDSPassword:
-                default: Amazon RDS SQL Instance Password
             TrustDirection:
                 default: Trust Direction from AWS Managed Microsft AD
 Conditions:
@@ -249,6 +227,26 @@ Resources:
             InternetGatewayId:
                 Ref: VPCIGW
             VpcId: !Ref VPC
+    MadAdminSecret:
+        Type: AWS::SecretsManager::Secret
+        Properties:
+            Name: !Sub MadAdminSecret
+            Description: Password for AWS Managed Microsoft AD
+            GenerateSecretString:
+                SecretStringTemplate: '{"username": "Admin"}'
+                GenerateStringKey: 'password'
+                PasswordLength: 30
+                ExcludeCharacters: '"@/\'
+    OnPremAdministratorSecret:
+        Type: AWS::SecretsManager::Secret
+        Properties:
+            Name: !Sub OnPremAdministratorSecret
+            Description: Administrator Password for Onpremises AD
+            GenerateSecretString:
+                SecretStringTemplate: '{"username": "Administrator"}'
+                GenerateStringKey: 'password'
+                PasswordLength: 30
+                ExcludeCharacters: '"@/\'
     InstanceRole:
         Type: AWS::IAM::Role
         Properties:
@@ -271,6 +269,13 @@ Resources:
                           - Action: cloudformation:SignalResource
                             Effect: Allow
                             Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+                          - Action:
+                                - secretsmanager:GetSecretValue
+                                - secretsmanager:DescribeSecret
+                            Effect: Allow
+                            Resource:
+                                - !Ref MadAdminSecret
+                                - !Ref OnPremAdministratorSecret
                           - Action: ssm:SendCommand
                             Effect: Allow
                             Resource:
@@ -516,9 +521,6 @@ Resources:
                 schemaVersion: "0.3"
                 description: Deploy Management Instance with PKI using SSM Automation
                 parameters:
-                    AdminPassword:
-                        description: Password for the Admin account (Also used to create the trust)
-                        type: String
                     DomainDNSName:
                         description: Fully qualified domain name (FQDN) of the forest root domain e.g. example.com
                         type: String
@@ -530,6 +532,9 @@ Resources:
                         type: String
                     OnpremDomainDNSName:
                         description: Fully qualified domain name (FQDN) of the forest root domain e.g. example.com
+                        type: String
+                    SecParamName:
+                        description: AWS Secrets Parameter Name
                         type: String
                     ServerNetBIOSName:
                         description: NetBIOS name of the Management Instance server (up to 15 characters)
@@ -799,6 +804,37 @@ Resources:
                               - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
+                                    Function Get-SecretInfo {
+                                        [CmdletBinding()]
+                                        Param (
+                                            [Parameter(Mandatory = $True)][String]$Domain,
+                                            [Parameter(Mandatory = $True)][String]$SecretArn
+                                        )
+
+                                        Write-Output "Getting $SecretArn Secret"
+                                        Try {
+                                            $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get $SecretArn Secret $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating PSCredential object from Secret'
+                                        $Username = $SecretContent.username
+                                        $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                                        $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                                        $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                                        $Output = [PSCustomObject][Ordered]@{
+                                            'Credentials'       = $Credentials
+                                            'DomainCredentials' = $DomainCredentials
+                                            'Username'          = $Username
+                                            'UserPassword'      = $UserPassword
+                                        }
+
+                                        Return $Output
+                                    }
+
                                     Function Get-EniConfig {
                                         Write-Output 'Getting network configuration'
                                         Try {
@@ -972,10 +1008,9 @@ Resources:
                                         }
                                     }
 
-                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                                    $AltAdminCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
+                                    $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}'
                                     $EniConfig = Get-EniConfig
-                                    Set-DscConfiguration -DaCredentials $AltAdminCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
+                                    Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
                                     Start-DscConfiguration 'C:\Temp\ConfigInstance' -Wait -Verbose -Force
                                     Invoke-DscStatusCheck
                           CloudWatchOutputConfig:
@@ -991,6 +1026,37 @@ Resources:
                               - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
+                                    Function Get-SecretInfo {
+                                        [CmdletBinding()]
+                                        Param (
+                                            [Parameter(Mandatory = $True)][String]$Domain,
+                                            [Parameter(Mandatory = $True)][String]$SecretArn
+                                        )
+
+                                        Write-Output "Getting $SecretArn Secret"
+                                        Try {
+                                            $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get $SecretArn Secret $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating PSCredential object from Secret'
+                                        $Username = $SecretContent.username
+                                        $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                                        $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                                        $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                                        $Output = [PSCustomObject][Ordered]@{
+                                            'Credentials'       = $Credentials
+                                            'DomainCredentials' = $DomainCredentials
+                                            'Username'          = $Username
+                                            'UserPassword'      = $UserPassword
+                                        }
+
+                                        Return $Output
+                                    }
+                              
                                     Function Invoke-EnterpriseCaConfig {
                                         [CmdletBinding()]
                                         Param (
@@ -1059,7 +1125,6 @@ Resources:
                                             Exit 1
                                         }
 
-                                        Write-Output 'Enabling CredSSP'
                                         Set-CredSSP -Action 'Enable'
 
                                         Write-Output 'Creating PKI CNAME record'
@@ -1077,7 +1142,6 @@ Resources:
                                             }
                                         } Until ($CnameRecordPresent -or $Counter -eq 12)
 
-                                        Write-Output 'Disabling CredSSP'
                                         Set-CredSSP -Action 'Disable'
 
                                         If ($Counter -ge 12) {
@@ -1310,7 +1374,7 @@ Resources:
                                             [Parameter(Mandatory = $true)][ValidateSet('Enable', 'Disable')][string]$Action
                                         )
 
-                                        $RootKey = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows'
+                                        $RootKey = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows'
                                         $CredDelKey = 'CredentialsDelegation'
                                         $FreshCredKey = 'AllowFreshCredentials'
                                         $FreshCredKeyNTLM = 'AllowFreshCredentialsWhenNTLMOnly'
@@ -1318,48 +1382,46 @@ Resources:
                                         Switch ($Action) {
                                             'Enable' {
                                                 Write-Output 'Enabling CredSSP'
-                                                Try {
-                                                    $Null = Enable-WSManCredSSP -Role 'Client' -DelegateComputer '*' -Force -ErrorAction Stop
-                                                    $Null = Enable-WSManCredSSP -Role 'Server' -Force -ErrorAction Stop
-                                                } Catch [System.Exception] {
-                                                    Write-Output "Failed to enable CredSSP $_"
-                                                    $Null = Disable-WSManCredSSP -Role 'Client' -ErrorAction SilentlyContinue
-                                                    $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
-                                                    Exit 1
-                                                }
-
-                                                $CredDelKeyPresent = Test-Path -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
+                                                $CredDelKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
                                                 If (-not $CredDelKeyPresent) {
-                                                    Write-Output 'Setting CredSSP registry entries'
+                                                    Write-Output "Setting CredSSP registry entry $CredDelKey"
                                                     Try {
-                                                        $CredDelPath = New-Item -Path $RootKey -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                                                        $CredDelPath = New-Item -Path "Registry::$RootKey" -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                                                     } Catch [System.Exception] {
-                                                        Write-Output "Failed to create CredSSP registry entries $_"
-                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Write-Output "Failed to create CredSSP registry entry $CredDelKey $_"
+                                                        Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                                                         Exit 1
                                                     }
+                                                } Else {
+                                                    $CredDelPath = Join-Path -Path $RootKey -ChildPath $CredDelKey
                                                 }
 
                                                 $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
                                                 If (-not $FreshCredKeyPresent) {
+                                                    Write-Output "Setting CredSSP registry entry $FreshCredKey"
                                                     Try {
                                                         $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                                                     } Catch [System.Exception] {
-                                                        Write-Output "Failed to create CredSSP registry entries $_"
-                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Write-Output "Failed to create CredSSP registry entry $FreshCredKey $_"
+                                                        Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                                                         Exit 1
                                                     }
+                                                } Else {
+                                                    $FreshCredKeyPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKey
                                                 }
 
                                                 $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
                                                 If (-not $FreshCredKeyNTLMPresent) {
+                                                    Write-Output "Setting CredSSP registry entry $FreshCredKeyNTLM"
                                                     Try {
                                                         $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                                                     } Catch [System.Exception] {
-                                                        Write-Output "Failed to create CredSSP registry entries $_"
-                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Write-Output "Failed to create CredSSP registry entry $FreshCredKeyNTLM $_"
+                                                        Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                                                         Exit 1
                                                     }
+                                                } Else {
+                                                    $FreshCredKeyNTLMPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKeyNTLM
                                                 }
 
                                                 Try {
@@ -1370,8 +1432,18 @@ Resources:
                                                     $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
                                                     $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
                                                 } Catch [System.Exception] {
-                                                    Write-Output "Failed to create CredSSP registry entries $_"
-                                                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                    Write-Output "Failed to create CredSSP registry properties $_"
+                                                    Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
+                                                    Exit 1
+                                                }
+
+                                                Try {
+                                                    $Null = Enable-WSManCredSSP -Role 'Client' -DelegateComputer '*' -Force -ErrorAction Stop
+                                                    $Null = Enable-WSManCredSSP -Role 'Server' -Force -ErrorAction Stop
+                                                } Catch [System.Exception] {
+                                                    Write-Output "Failed to enable CredSSP $_"
+                                                    $Null = Disable-WSManCredSSP -Role 'Client' -ErrorAction SilentlyContinue
+                                                    $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
                                                     Exit 1
                                                 }
                                             }
@@ -1387,7 +1459,7 @@ Resources:
 
                                                 Write-Output 'Removing CredSSP registry entries'
                                                 Try {
-                                                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                    Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
                                                 } Catch [System.Exception] {
                                                     Write-Output "Failed to remove CredSSP registry entries $_"
                                                     Exit 1
@@ -1504,7 +1576,6 @@ Resources:
                                             (Get-ADGroup -Identity 'Domain Admins' | Select-Object -ExpandProperty 'SID')
                                         )
 
-                                        Write-Output 'Enabling CredSSP'
                                         Set-CredSSP -Action 'Enable'
 
                                         Write-Output 'Sleeping to ensure replication of certificate template has completed'
@@ -1560,7 +1631,6 @@ Resources:
                                         Write-Output 'Sleeping to ensure replication of certificate template publish has completed'
                                         Start-Sleep -Seconds 60
 
-                                        Write-Output 'Disabling CredSSP'
                                         Set-CredSSP -Action 'Disable'
                                     }
 
@@ -1708,7 +1778,7 @@ Resources:
                                     $TrustTypeForest = New-Object -TypeName 'Amazon.DirectoryService.TrustType' -ArgumentList 'Forest'
                                     $TrustDir = New-Object -TypeName 'Amazon.DirectoryService.TrustDirection' -ArgumentList $TrustDirMAD
                                     $SelectiveAuthDis = New-Object -TypeName 'Amazon.DirectoryService.SelectiveAuth' -ArgumentList 'Disabled'
-                                    $TrustPassword = '{{AdminPassword}}'
+                                    $TrustPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}').UserPassword
 
                                     Write-Output 'Creating trust between MAD and Onprem.'
                                     Try {
@@ -1738,8 +1808,7 @@ Resources:
                                         Exit 1
                                     }
 
-                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                                    $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
+                                    $Credentials = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}').DomainCredentials
                                     Invoke-EnterpriseCaConfig -Credentials $Credentials -EntCaCommonName '{{ServerNetBIOSName}}' -EntCaHashAlgorithm 'SHA256' -EntCaKeyLength '2048' -EntCaValidityPeriodUnits '5' -VPCCIDR '{{VPCCIDR}}'
                           CloudWatchOutputConfig:
                               CloudWatchOutputEnabled: true
@@ -2788,8 +2857,8 @@ Resources:
                 schemaVersion: "0.3"
                 description: Deploy AD with SSM Automation
                 parameters:
-                    AdminPassword:
-                        description: Password for the Admin account (Also used to create the trust)
+                    AltSecParamName:
+                        description: AWS Secrets Parameter Name
                         type: String
                     DomainDNSName:
                         description: Fully qualified domain name (FQDN) of the forest root domain e.g. onpremises.local
@@ -2805,6 +2874,9 @@ Resources:
                         type: String
                     MadDNSName:
                         description: Fully qualified domain name (FQDN) of the MAD domain e.g. corp.example.com
+                        type: String
+                    SecParamName:
+                        description: AWS Secrets Parameter Name
                         type: String
                     ServerNetBIOSName:
                         description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
@@ -3078,6 +3150,37 @@ Resources:
                               - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
+                                    Function Get-SecretInfo {
+                                        [CmdletBinding()]
+                                        Param (
+                                            [Parameter(Mandatory = $True)][String]$Domain,
+                                            [Parameter(Mandatory = $True)][String]$SecretArn
+                                        )
+
+                                        Write-Output "Getting $SecretArn Secret"
+                                        Try {
+                                            $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get $SecretArn Secret $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating PSCredential object from Secret'
+                                        $Username = $SecretContent.username
+                                        $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                                        $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                                        $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                                        $Output = [PSCustomObject][Ordered]@{
+                                            'Credentials'       = $Credentials
+                                            'DomainCredentials' = $DomainCredentials
+                                            'Username'          = $Username
+                                            'UserPassword'      = $UserPassword
+                                        }
+
+                                        Return $Output
+                                    }
+
                                     Function Get-EniConfig {
                                         Write-Output 'Getting network configuration'
                                         Try {
@@ -3474,12 +3577,10 @@ Resources:
                                         }
                                     }
 
-                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                                    $AltAdminCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
-                                    $DaCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Administrator', $UserPassword)
-                                    $RestoreModeCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('Administrator', $UserPassword)
+                                    $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}'
+                                    $AltSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AltSecParamName}}'
                                     $EniConfig = Get-EniConfig
-                                    Set-DscConfiguration -AltAdminCredentials $AltAdminCredentials -AltAdminUserName 'Admin' -DaCredentials $DaCredentials -DnsInstanceIP $EniConfig.DnsIpAddress -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $RestoreModeCredentials -MacAddress $EniConfig.MacAddress -MadDNSName '{{MadDNSName}}' -RestoreModeCredentials $RestoreModeCredentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
+                                    Set-DscConfiguration -AltAdminCredentials $AltSecret.Credentials -AltAdminUserName $AltSecret.Username -DaCredentials $Secret.DomainCredentials -DnsInstanceIP $EniConfig.DnsIpAddress -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $Secret.Credentials -MacAddress $EniConfig.MacAddress -MadDNSName '{{MadDNSName}}'-RestoreModeCredentials $Secret.Credentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
                                     Start-DscConfiguration 'C:\Temp\ConfigInstance' -Wait -Verbose -Force
                                     Invoke-DscStatusCheck
                           CloudWatchOutputConfig:
@@ -3495,6 +3596,37 @@ Resources:
                               - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
+                                    Function Get-SecretInfo {
+                                        [CmdletBinding()]
+                                        Param (
+                                            [Parameter(Mandatory = $True)][String]$Domain,
+                                            [Parameter(Mandatory = $True)][String]$SecretArn
+                                        )
+
+                                        Write-Output "Getting $SecretArn Secret"
+                                        Try {
+                                            $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get $SecretArn Secret $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating PSCredential object from Secret'
+                                        $Username = $SecretContent.username
+                                        $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                                        $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                                        $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                                        $Output = [PSCustomObject][Ordered]@{
+                                            'Credentials'       = $Credentials
+                                            'DomainCredentials' = $DomainCredentials
+                                            'Username'          = $Username
+                                            'UserPassword'      = $UserPassword
+                                        }
+
+                                        Return $Output
+                                    }
+
                                     Function Invoke-TrustAction {
                                         [CmdletBinding()]
                                         Param(
@@ -3578,8 +3710,10 @@ Resources:
                                             Exit 1
                                         }
 
+                                        $UserPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}').UserPassword
+
                                         $User = @{
-                                            AccountPassword        = '{{AdminPassword}}' | ConvertTo-SecureString -AsPlainText -Force
+                                            AccountPassword        = $UserPassword
                                             Name                   = 'FSxServiceAccount'
                                             DisplayName            = 'FSxServiceAccount'
                                             SamAccountName         = 'FSxServiceAccount'
@@ -3700,7 +3834,7 @@ Resources:
                                         Default { Throw 'InvalidArgument: Invalid value is passed for parameter TrustDirection' }
                                     }
 
-                                    $TrustPassword = '{{AdminPassword}}'
+                                    $TrustPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AltSecParamName}}').UserPassword
 
                                     Write-Output 'Creating Onprem side of trust.'
                                     Invoke-TrustAction -RemoteFQDN '{{MadDNSName}}' -TrustPassword $TrustPassword $TrustDirOnprem
@@ -5057,14 +5191,14 @@ Resources:
                 schemaVersion: "0.3"
                 description: Deploy Enterpise CA using SSM Automation
                 parameters:
-                    AdminPassword:
-                        description: Password for the Admin account (Also used to create the trust)
-                        type: String
                     DomainDNSName:
                         description: Fully qualified domain name (FQDN) of the forest root domain e.g. example.com
                         type: String
                     DomainNetBIOSName:
                         description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. EXAMPLE
+                        type: String
+                    SecParamName:
+                        description: AWS Secrets Parameter Name
                         type: String
                     ServerNetBIOSName:
                         description: NetBIOS name of the Management Instance server (up to 15 characters)
@@ -5321,6 +5455,37 @@ Resources:
                               - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
+                                    Function Get-SecretInfo {
+                                        [CmdletBinding()]
+                                        Param (
+                                            [Parameter(Mandatory = $True)][String]$Domain,
+                                            [Parameter(Mandatory = $True)][String]$SecretArn
+                                        )
+
+                                        Write-Output "Getting $SecretArn Secret"
+                                        Try {
+                                            $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get $SecretArn Secret $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating PSCredential object from Secret'
+                                        $Username = $SecretContent.username
+                                        $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                                        $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                                        $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                                        $Output = [PSCustomObject][Ordered]@{
+                                            'Credentials'       = $Credentials
+                                            'DomainCredentials' = $DomainCredentials
+                                            'Username'          = $Username
+                                            'UserPassword'      = $UserPassword
+                                        }
+
+                                        Return $Output
+                                    }
+                              
                                     Function Get-EniConfig {
                                         Write-Output 'Getting network configuration'
                                         Try {
@@ -5498,10 +5663,9 @@ Resources:
                                         }
                                     }
 
-                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                                    $AltAdminCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Administrator', $UserPassword)
+                                    $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}'
                                     $EniConfig = Get-EniConfig
-                                    Set-DscConfiguration -DaCredentials $AltAdminCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
+                                    Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
                                     Start-DscConfiguration 'C:\Temp\ConfigInstance' -Wait -Verbose -Force
                                     Invoke-DscStatusCheck
                           CloudWatchOutputConfig:
@@ -5517,6 +5681,37 @@ Resources:
                               - "{{InstanceId.InstanceId}}"
                           Parameters:
                               commands: |-
+                                    Function Get-SecretInfo {
+                                        [CmdletBinding()]
+                                        Param (
+                                            [Parameter(Mandatory = $True)][String]$Domain,
+                                            [Parameter(Mandatory = $True)][String]$SecretArn
+                                        )
+
+                                        Write-Output "Getting $SecretArn Secret"
+                                        Try {
+                                            $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to get $SecretArn Secret $_"
+                                            Exit 1
+                                        }
+
+                                        Write-Output 'Creating PSCredential object from Secret'
+                                        $Username = $SecretContent.username
+                                        $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                                        $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                                        $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                                        $Output = [PSCustomObject][Ordered]@{
+                                            'Credentials'       = $Credentials
+                                            'DomainCredentials' = $DomainCredentials
+                                            'Username'          = $Username
+                                            'UserPassword'      = $UserPassword
+                                        }
+
+                                        Return $Output
+                                    }
+
                                     Function Invoke-EnterpriseCaConfig {
                                         [CmdletBinding()]
                                         Param (
@@ -5842,7 +6037,7 @@ Resources:
                                             [Parameter(Mandatory = $true)][ValidateSet('Enable', 'Disable')][string]$Action
                                         )
 
-                                        $RootKey = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows'
+                                        $RootKey = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows'
                                         $CredDelKey = 'CredentialsDelegation'
                                         $FreshCredKey = 'AllowFreshCredentials'
                                         $FreshCredKeyNTLM = 'AllowFreshCredentialsWhenNTLMOnly'
@@ -5850,48 +6045,46 @@ Resources:
                                         Switch ($Action) {
                                             'Enable' {
                                                 Write-Output 'Enabling CredSSP'
-                                                Try {
-                                                    $Null = Enable-WSManCredSSP -Role 'Client' -DelegateComputer '*' -Force -ErrorAction Stop
-                                                    $Null = Enable-WSManCredSSP -Role 'Server' -Force -ErrorAction Stop
-                                                } Catch [System.Exception] {
-                                                    Write-Output "Failed to enable CredSSP $_"
-                                                    $Null = Disable-WSManCredSSP -Role 'Client' -ErrorAction SilentlyContinue
-                                                    $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
-                                                    Exit 1
-                                                }
-
-                                                $CredDelKeyPresent = Test-Path -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
+                                                $CredDelKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
                                                 If (-not $CredDelKeyPresent) {
-                                                    Write-Output 'Setting CredSSP registry entries'
+                                                    Write-Output "Setting CredSSP registry entry $CredDelKey"
                                                     Try {
-                                                        $CredDelPath = New-Item -Path $RootKey -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                                                        $CredDelPath = New-Item -Path "Registry::$RootKey" -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                                                     } Catch [System.Exception] {
-                                                        Write-Output "Failed to create CredSSP registry entries $_"
-                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Write-Output "Failed to create CredSSP registry entry $CredDelKey $_"
+                                                        Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                                                         Exit 1
                                                     }
+                                                } Else {
+                                                    $CredDelPath = Join-Path -Path $RootKey -ChildPath $CredDelKey
                                                 }
 
                                                 $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
                                                 If (-not $FreshCredKeyPresent) {
+                                                    Write-Output "Setting CredSSP registry entry $FreshCredKey"
                                                     Try {
                                                         $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                                                     } Catch [System.Exception] {
-                                                        Write-Output "Failed to create CredSSP registry entries $_"
-                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Write-Output "Failed to create CredSSP registry entry $FreshCredKey $_"
+                                                        Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                                                         Exit 1
                                                     }
+                                                } Else {
+                                                    $FreshCredKeyPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKey
                                                 }
 
                                                 $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
                                                 If (-not $FreshCredKeyNTLMPresent) {
+                                                    Write-Output "Setting CredSSP registry entry $FreshCredKeyNTLM"
                                                     Try {
                                                         $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
                                                     } Catch [System.Exception] {
-                                                        Write-Output "Failed to create CredSSP registry entries $_"
-                                                        Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                        Write-Output "Failed to create CredSSP registry entry $FreshCredKeyNTLM $_"
+                                                        Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
                                                         Exit 1
                                                     }
+                                                } Else {
+                                                    $FreshCredKeyNTLMPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKeyNTLM
                                                 }
 
                                                 Try {
@@ -5902,8 +6095,18 @@ Resources:
                                                     $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
                                                     $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
                                                 } Catch [System.Exception] {
-                                                    Write-Output "Failed to create CredSSP registry entries $_"
-                                                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                    Write-Output "Failed to create CredSSP registry properties $_"
+                                                    Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
+                                                    Exit 1
+                                                }
+
+                                                Try {
+                                                    $Null = Enable-WSManCredSSP -Role 'Client' -DelegateComputer '*' -Force -ErrorAction Stop
+                                                    $Null = Enable-WSManCredSSP -Role 'Server' -Force -ErrorAction Stop
+                                                } Catch [System.Exception] {
+                                                    Write-Output "Failed to enable CredSSP $_"
+                                                    $Null = Disable-WSManCredSSP -Role 'Client' -ErrorAction SilentlyContinue
+                                                    $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
                                                     Exit 1
                                                 }
                                             }
@@ -5919,7 +6122,7 @@ Resources:
 
                                                 Write-Output 'Removing CredSSP registry entries'
                                                 Try {
-                                                    Remove-Item -Path (Join-Path -Path $RootKey -ChildPath $CredDelKey) -Force -Recurse
+                                                    Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
                                                 } Catch [System.Exception] {
                                                     Write-Output "Failed to remove CredSSP registry entries $_"
                                                     Exit 1
@@ -6036,7 +6239,6 @@ Resources:
                                             (Get-ADGroup -Identity 'Domain Admins' | Select-Object -ExpandProperty 'SID')
                                         )
 
-                                        Write-Output 'Enabling CredSSP'
                                         Set-CredSSP -Action 'Enable'
 
                                         Write-Output 'Sleeping to ensure replication of certificate template has completed'
@@ -6092,7 +6294,6 @@ Resources:
                                         Write-Output 'Sleeping to ensure replication of certificate template publish has completed'
                                         Start-Sleep -Seconds 60
 
-                                        Write-Output 'Disabling CredSSP'
                                         Set-CredSSP -Action 'Disable'
                                     }
 
@@ -6209,9 +6410,8 @@ Resources:
                                         }
                                     }
 
-                                    $UserPassword = ConvertTo-SecureString '{{AdminPassword}}' -AsPlainText -Force
-                                    $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ('{{DomainDNSName}}\Admin', $UserPassword)
-                                    Invoke-EnterpriseCaConfig -Credentials $Credentials -EntCaCommonName '{{ServerNetBIOSName}}' -EntCaHashAlgorithm 'SHA256' -EntCaKeyLength '2048' -EntCaValidityPeriodUnits '5' -VPCCIDR '{{VPCCIDR}}'
+                                    $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}'
+                                    Invoke-EnterpriseCaConfig -Credentials $Secret.DomainCredentials -EntCaCommonName '{{ServerNetBIOSName}}' -EntCaHashAlgorithm 'SHA256' -EntCaKeyLength '2048' -EntCaValidityPeriodUnits '5' -VPCCIDR '{{VPCCIDR}}'
                           CloudWatchOutputConfig:
                               CloudWatchOutputEnabled: true
                               CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
@@ -6273,7 +6473,7 @@ Resources:
             Edition: Enterprise
             EnableSso: false
             Name: !Ref MADDomainName
-            Password: !Ref AdminPassword
+            Password: !Sub '{{resolve:secretsmanager:${MadAdminSecret}:SecretString:password}}'
             ShortName: !Ref MADNetBIOSName
             VpcSettings:
                 SubnetIds:
@@ -6317,7 +6517,7 @@ Resources:
             EngineVersion: 15.00.4073.23.v1
             LicenseModel: license-included
             MasterUsername: admin
-            MasterUserPassword: !Ref RDSPassword
+            MasterUserPassword: !Sub '{{resolve:secretsmanager:${MadAdminSecret}:SecretString:password}}'
             MultiAZ: false
             StorageType: gp2
             VPCSecurityGroups:
@@ -6372,7 +6572,7 @@ Resources:
                       VolumeType: gp3
             IamInstanceProfile: !Ref InstanceProfile
             ImageId: !Ref AMI
-            InstanceType: t3.large
+            InstanceType: m6a.large
             SecurityGroupIds:
                 - Ref: OnPremDomainControllerSG
             SubnetId: !Ref VPCPublicSubnet1Subnet
@@ -6388,7 +6588,8 @@ Resources:
                     - |
                         <powershell>
                         $Params = @{
-                            AdminPassword = '${AdminPassword}'
+                            SecParamName = '${OnPremAdministratorSecret}'
+                            AltSecParamName = '${MadAdminSecret}'
                             ServerNetBIOSName = 'ONPREM-DC01'
                             DomainDNSName = '${OnpremDomainName}'
                             DomainNetBIOSName = '${OnpremNetBIOSName}'
@@ -6407,7 +6608,7 @@ Resources:
         Type: AWS::EC2::Instance
         CreationPolicy:
             ResourceSignal:
-                Timeout: PT30M
+                Timeout: PT60M
                 Count: 1
         DependsOn: OnPremDomainController
         Properties:
@@ -6428,7 +6629,7 @@ Resources:
                       DeleteOnTermination: true
             IamInstanceProfile: !Ref InstanceProfile
             ImageId: !Ref AMI
-            InstanceType: t3.large
+            InstanceType: m6a.large
             SecurityGroupIds:
                 - !Ref DomainMembersSG
             SubnetId: !Ref VPCPublicSubnet1Subnet
@@ -6444,7 +6645,7 @@ Resources:
                     - |
                         <powershell>
                         $Params = @{
-                            AdminPassword = '${AdminPassword}'
+                            SecParamName = '${OnPremAdministratorSecret}'
                             DomainDNSName = '${OnpremDomainName}'
                             DomainNetBIOSName = '${OnpremNetBIOSName}'
                             ServerNetBIOSName = 'ONPREM-PKI01'
@@ -6478,7 +6679,7 @@ Resources:
                   DomainName: !Ref OnpremDomainName
                   FileSystemAdministratorsGroup: FSxAdmins
                   OrganizationalUnitDistinguishedName: !Join [ ',', [ OU=FSx, !Ref FSxwSMMADOU ] ]
-                  Password: !Ref AdminPassword
+                  Password: !Sub '{{resolve:secretsmanager:${OnPremAdministratorSecret}:SecretString:password}}'
                   UserName: FSxServiceAccount
                 ThroughputCapacity: 16
             Tags:
@@ -6506,7 +6707,7 @@ Resources:
         Type: AWS::EC2::Instance
         CreationPolicy:
             ResourceSignal:
-                Timeout: PT30M
+                Timeout: PT60M
                 Count: 1
         DependsOn: RR53RRAssocOnprem
         Properties:
@@ -6527,7 +6728,7 @@ Resources:
                       DeleteOnTermination: true
             IamInstanceProfile: !Ref InstanceProfile
             ImageId: !Ref AMI
-            InstanceType: t3.large
+            InstanceType: m6a.large
             SecurityGroupIds:
                 - !Ref DomainMembersSG
             SubnetId: !Ref VPCPublicSubnet1Subnet
@@ -6543,7 +6744,7 @@ Resources:
                     - |
                         <powershell>
                         $Params = @{
-                            AdminPassword = '${AdminPassword}'
+                            SecParamName = '${MadAdminSecret}'
                             DomainDNSName = '${MADDomainName}'
                             DomainNetBIOSName = '${MADNetBIOSName}'
                             ServerNetBIOSName = 'MAD-MGMT01'
@@ -6558,6 +6759,9 @@ Resources:
                         </powershell>
                     - VPCCIDR: !GetAtt VPC.CidrBlock
 Outputs:
+    MadAdminSecretArn:
+        Description: MAD Admin Account Secret ARN
+        Value: !Ref MadAdminSecret
     MADManagementInstanceID:
         Description: MAD Management Instance ID
         Value: !Ref MgmtInstance
@@ -6573,6 +6777,9 @@ Outputs:
     MADPrivateIP2:
         Description: MAD DNS IP 2
         Value: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
+    OnPremAdministratorSecretArn:
+        Description: OnPrem AD Administrator Secret ARN
+        Value: !Ref OnPremAdministratorSecret
     OnpremDomainControllerInstanceID:
         Description: Onprem Domain Controller Instance ID
         Value: !Ref OnPremDomainController
