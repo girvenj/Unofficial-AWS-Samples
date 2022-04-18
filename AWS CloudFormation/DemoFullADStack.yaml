@@ -302,13 +302,13 @@ Resources:
                                 - ds:VerifyTrust
                             Effect: Allow
                             Resource: "*"
-                          - Action:
-                                - ec2:AuthorizeSecurityGroupEgress
-                                - ec2:DescribeSecurityGroups
+                          - Action: ec2:AuthorizeSecurityGroupEgress
                             Effect: Allow
-                            Resource: "*"
+                            Resource:
+                                - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
                           - Action:
                                 - ec2:DescribeInstances
+                                - ec2:DescribeSecurityGroups
                                 - ssm:DescribeInstanceInformation
                                 - ssm:GetAutomationExecution
                                 - ssm:ListCommands
@@ -580,6 +580,30 @@ Resources:
                           Parameters:
                               commands: |-
                                     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+                                    $RegistryItems = @(
+                                        @{
+                                            Name         = 'SchUseStrongCrypto'
+                                            Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\.NETFramework\v4.0.30319'
+                                            Value        = '1'
+                                            PropertyType = 'DWORD'
+                                        },
+                                        @{
+                                            Name         = 'SchUseStrongCrypto'
+                                            Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319'
+                                            Value        = '1'
+                                            PropertyType = 'DWORD'
+                                        }
+                                    )
+
+                                    Foreach ($RegistryItem in $RegistryItems) {
+                                        Try {
+                                            $Null = New-ItemProperty @RegistryItem -Force -ErrorAction Stop
+                                        } Catch [System.Exception] {
+                                            Write-Output "Failed to create Registry key named $($RegistryItem.Name) at $($RegistryItem.Path) $_"
+                                            Exit 1
+                                        }
+                                    }                                    
 
                                     $Modules = @(
                                         @{
