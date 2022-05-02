@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  AMI:
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-x86_64-gp2
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Configuration
+        Parameters:
+          - AMI
+    ParameterLabels:
+      AMI:
+        default: SSM Parameter Value for Latest AMI ID
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: ImmersionDay-VPC
+  VPCPublicSubnet1Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      CidrBlock: !Select
+        - 0
+        - Fn::Cidr:
+            - !GetAtt VPC.CidrBlock
+            - 2
+            - 6
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ImmersionDay-Subnet1
+      VpcId: !Ref VPC
+  VPCPublicSubnet1RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ImmersionDay-Subnet1
+      VpcId: !Ref VPC
+  VPCPublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPCPublicSubnet1RouteTable
+      SubnetId:
+        Ref: VPCPublicSubnet1Subnet
+  VPCPublicSubnet1DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCVPCGW
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPCIGW
+      RouteTableId:
+        Ref: VPCPublicSubnet1RouteTable
+  VPCPublicSubnet2Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      CidrBlock: !Select
+        - 1
+        - Fn::Cidr:
+            - !GetAtt VPC.CidrBlock
+            - 2
+            - 6
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ImmersionDay-Subnet2
+      VpcId: !Ref VPC
+  VPCPublicSubnet2RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ImmersionDay-Subnet2
+      VpcId: !Ref VPC
+  VPCPublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPCPublicSubnet2RouteTable
+      SubnetId:
+        Ref: VPCPublicSubnet2Subnet
+  VPCPublicSubnet2DefaultRoute:
+    DependsOn: VPCVPCGW
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPCIGW
+      RouteTableId:
+        Ref: VPCPublicSubnet2RouteTable
+  VPCIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ImmersionDay-IGW
+  VPCVPCGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId:
+        Ref: VPCIGW
+      VpcId: !Ref VPC
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        !Sub
+          - 'immersion-day-${RandomGUID}'
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]] }
+      VersioningConfiguration:
+        Status: Enabled
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy
+      Path: /
+      Policies:
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: 
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetEncryptionConfiguration
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::${S3Bucket}/*
+                  - !Sub arn:aws:s3:::${S3Bucket}
+          PolicyName: Inline-Policy
+      RoleName: SM-Workshop-ManagedInstancesRole
+      Tags:
+        - Key: StackName
+          Value:
+            Ref: AWS::StackName
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: SM-Workshop-ManagedInstancesRole
+      Path: /
+      Roles:
+        - Ref: InstanceRole
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: MAD Domain Members and RDS SG
+      SecurityGroupIngress:
+        - Description: All Local VPC Traffic
+          FromPort: -1
+          IpProtocol: "-1"
+          CidrIp: 10.0.0.0/24
+          ToPort: -1
+        - Description: RDP Access
+          FromPort: 3389
+          IpProtocol: tcp
+          CidrIp: 10.0.0.0/24
+          ToPort: 3389
+        - Description: SSH Access
+          FromPort: 22
+          IpProtocol: tcp
+          CidrIp: 10.0.0.0/24
+          ToPort: 22
+      Tags:
+        - Key: Name
+          Value: ImmersionDaySecurityGroup
+      VpcId: !Ref VPC
+  App1Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp3
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            DeleteOnTermination: true
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref AMI
+      InstanceType: t3.small
+      KeyName: ee-default-keypair
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      SubnetId: !Ref VPCPublicSubnet1Subnet
+      Tags:
+        - Key: Name
+          Value: App01
+  App2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp3
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            DeleteOnTermination: true
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref AMI
+      InstanceType: t3.small
+      KeyName: ee-default-keypair
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      SubnetId: !Ref VPCPublicSubnet1Subnet
+      Tags:
+        - Key: Name
+          Value: App02
+  Web1Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp3
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            DeleteOnTermination: true
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref AMI
+      InstanceType: t3.small
+      KeyName: ee-default-keypair
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      SubnetId: !Ref VPCPublicSubnet1Subnet
+      Tags:
+        - Key: Name
+          Value: Web01
+  Web2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp3
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            DeleteOnTermination: true
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref AMI
+      InstanceType: t3.small
+      KeyName: ee-default-keypair
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      SubnetId: !Ref VPCPublicSubnet1Subnet
+      Tags:
+        - Key: Name
+          Value: Web02
