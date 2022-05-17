@@ -344,7 +344,7 @@ Resources:
         SecretStringTemplate: '{"username": "Administrator"}'
         GenerateStringKey: 'password'
         PasswordLength: 30
-        ExcludeCharacters: '"@/\'        
+        ExcludeCharacters: '"@/\'
   OnPremAltAdminSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -354,7 +354,7 @@ Resources:
         SecretStringTemplate: '{"username": "Admin"}'
         GenerateStringKey: 'password'
         PasswordLength: 30
-        ExcludeCharacters: '"@/\'  
+        ExcludeCharacters: '"@/\'
   OnPremRestoreModeSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -364,7 +364,7 @@ Resources:
         SecretStringTemplate: '{"username": "Administrator"}'
         GenerateStringKey: 'password'
         PasswordLength: 30
-        ExcludeCharacters: '"@/\'      
+        ExcludeCharacters: '"@/\'
   RdsAdminSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -374,7 +374,7 @@ Resources:
         SecretStringTemplate: '{"username": "admin"}'
         GenerateStringKey: 'password'
         PasswordLength: 30
-        ExcludeCharacters: '"@/\'                     
+        ExcludeCharacters: '"@/\'
   ManagedAD:
     Type: AWS::DirectoryService::MicrosoftAD
     Properties:
@@ -655,7 +655,7 @@ Resources:
                           Write-Output "Failed to disable Windows Firewall $_"
                           Exit 1
                       }
-                      
+
                       Write-Output 'Creating file directory for DSC public cert'
                       Try {
                           $Null = New-Item -Path 'C:\Temp\publickeys' -ItemType 'Directory' -ErrorAction Stop
@@ -663,7 +663,7 @@ Resources:
                           Write-Output "Failed to create publickeys file directory $_"
                           Exit 1
                       }
-                      
+
                       Write-Output 'Creating certificate to encrypt credentials in MOF file'
                       Try {
                           $cert = New-SelfSignedCertificate -Type 'DocumentEncryptionCertLegacyCsp' -DnsName 'AWSQSDscEncryptCert' -HashAlgorithm 'SHA256' -ErrorAction Stop
@@ -671,14 +671,14 @@ Resources:
                           Write-Output "Failed to create self signed cert $_"
                           Exit 1
                       }
-                      
+
                       Write-Output 'Exporting the self signed public key certificate'
                       Try {
                           $Null = $cert | Export-Certificate -FilePath 'C:\Temp\publickeys\AWSQSDscPublicKey.cer' -Force -ErrorAction Stop
                       } Catch [System.Exception] {
                           Write-Output "Failed to copy self signed cert to publickeys directory $_"
                           Exit 1
-                      }    
+                      }
                   }
 
                   Function Invoke-LcmConfig {
@@ -689,7 +689,7 @@ Resources:
                           Write-Output "Failed to get DSC cert thumbprint $_"
                           Exit 1
                       } 
-                      
+
                       [DSCLocalConfigurationManager()]
                       Configuration LCMConfig
                       {
@@ -697,14 +697,14 @@ Resources:
                               Settings {
                                   RefreshMode                    = 'Push'
                                   ConfigurationModeFrequencyMins = 15
-                                  ActionAfterReboot              = 'StopConfiguration'                      
+                                  ActionAfterReboot              = 'StopConfiguration'
                                   RebootNodeIfNeeded             = $false
                                   ConfigurationMode              = 'ApplyAndAutoCorrect'
-                                  CertificateId                  = $DscCertThumbprint  
+                                  CertificateId                  = $DscCertThumbprint
                               }
                           }
                       }
-                      
+
                       Write-Output 'Generating MOF file for LCM'
                       LCMConfig -OutputPath 'C:\Temp\LCMConfig'
                           
@@ -774,7 +774,7 @@ Resources:
                           Write-Output "Failed to get DSC cert thumbprint $_"
                           Exit 1
                       }
-                      
+
                       Write-Output 'Creating configuration data block that has the certificate information for DSC configuration processing'
                       $ConfigurationData = @{
                           AllNodes = @(
@@ -789,7 +789,7 @@ Resources:
                               }
                           )
                       }
-                      
+
                       Configuration ConfigInstance {
                           Import-DscResource -ModuleName 'PSDesiredStateConfiguration', 'NetworkingDsc', 'ComputerManagementDsc', 'DnsServerDsc', 'ActiveDirectoryDsc'
                           Node LocalHost {
@@ -918,7 +918,7 @@ Resources:
                           $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
                       } Catch [System.Exception] {
                           Write-Output "Failed to get $SecretArn Secret $_"
-                          Exit 1
+                         #Exit 1
                       }
 
                       Write-Output 'Creating PSCredential object from Secret'
@@ -1039,7 +1039,7 @@ Resources:
                               Exit 1
                           }
                       }
-                  }                  
+                  }
 
                   Function Invoke-Cleanup {
                       [CmdletBinding()]
@@ -1131,7 +1131,7 @@ Resources:
                       }
                   }
 
-                  $DomainCreds = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAltUserSecParamName}}' | Select-Object -ExpandProperty 'DomainCredentials'
+                  $DomainCreds = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAltUserSecParamName}}').DomainCredentials
 
                   Write-Output 'Getting AD domain'
                   Try {
@@ -1145,7 +1145,7 @@ Resources:
                   $FQDN = $Domain | Select-Object -ExpandProperty 'DNSRoot'
                   $Netbios = $Domain | Select-Object -ExpandProperty 'NetBIOSName'
                   
-                  $UserPassword = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAltUserSecParamName}}' | Select-Object -ExpandProperty 'UserPassword'
+                  $UserPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAltUserSecParamName}}').UserPassword
 
                   $User = @{
                       AccountPassword        = $UserPassword
@@ -1156,13 +1156,13 @@ Resources:
                       KerberosEncryptionType = 'AES128', 'AES256'
                       PasswordNeverExpires   = $True
                       Enabled                = $True
-                      Path                   = $("OU=Netbios,$BaseDn")
-                      Credentials            = $DomainCreds
+                      Path                   = $("OU=Users,OU=$Netbios,$BaseDn")
+                      Credential             = $DomainCreds
                   }
 
                   Write-Output 'Creating Joiner-Svc'
                   Try {
-                      New-ADUser @User
+                      New-ADUser @User -ErrorAction Stop
                   } Catch [System.Exception] {
                       Write-Output "Failed to create Joiner-Svc $_"
                       Exit 1
@@ -1196,7 +1196,15 @@ Resources:
                           ActiveDirectorySecurityInheritance = 'All'
                           InheritedObjectGuid                = $NullGuid
                           Credential                         = $DomainCreds
-                      }
+                      },
+                      @{
+                          ActiveDirectoryRights              = 'GenericRead, GenericWrite, ListChildren, ReadControl'
+                          AccessControlType                  = 'Allow'
+                          ObjectGUID                         = $NullGuid
+                          ActiveDirectorySecurityInheritance = 'Descendents'
+                          InheritedObjectGuid                = $ComputerNameGuid
+                          Credential                         = $DomainCreds
+                      }                      
                   )
 
                   Write-Output 'Getting Joiner-Svc SID'
@@ -1207,9 +1215,13 @@ Resources:
                       Exit 1
                   }
 
+                  Set-CredSSP -Action 'Enable'
+
                   Foreach ($AclRule in $AclRules) {
-                      Add-OuAcl -AclPath $FsxOU -Credential $AclRule.DomainCreds -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.ActiveDirectoryRights -AccessControlType $AclRule.AccessControlType -ObjectGUID $AclRule.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.ActiveDirectorySecurityInheritance -InheritedObjectGuid $AclRule.InheritedObjectGuid
+                      Add-OuAcl -AclPath "OU=Computers,OU=$Netbios,$BaseDn" -Credential $AclRule.Credential -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.ActiveDirectoryRights -AccessControlType $AclRule.AccessControlType -ObjectGUID $AclRule.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.ActiveDirectorySecurityInheritance -InheritedObjectGuid $AclRule.InheritedObjectGuid
                   }
+
+                  Set-CredSSP -Action 'Disable'
 
                   Invoke-Cleanup -VPCCIDR '{{VPCCIDR}}'
               CloudWatchOutputConfig:
@@ -1471,7 +1483,7 @@ Resources:
                           Write-Output "Failed to disable Windows Firewall $_"
                           Exit 1
                       }
-                      
+
                       Write-Output 'Creating file directory for DSC public cert'
                       Try {
                           $Null = New-Item -Path 'C:\Temp\publickeys' -ItemType 'Directory' -ErrorAction Stop
@@ -1479,7 +1491,7 @@ Resources:
                           Write-Output "Failed to create publickeys file directory $_"
                           Exit 1
                       }
-                      
+
                       Write-Output 'Creating certificate to encrypt credentials in MOF file'
                       Try {
                           $cert = New-SelfSignedCertificate -Type 'DocumentEncryptionCertLegacyCsp' -DnsName 'AWSQSDscEncryptCert' -HashAlgorithm 'SHA256' -ErrorAction Stop
@@ -1487,14 +1499,14 @@ Resources:
                           Write-Output "Failed to create self signed cert $_"
                           Exit 1
                       }
-                      
+
                       Write-Output 'Exporting the self signed public key certificate'
                       Try {
                           $Null = $cert | Export-Certificate -FilePath 'C:\Temp\publickeys\AWSQSDscPublicKey.cer' -Force -ErrorAction Stop
                       } Catch [System.Exception] {
                           Write-Output "Failed to copy self signed cert to publickeys directory $_"
                           Exit 1
-                      }    
+                      }
                   }
 
                   Function Invoke-LcmConfig {
@@ -1505,7 +1517,7 @@ Resources:
                           Write-Output "Failed to get DSC cert thumbprint $_"
                           Exit 1
                       } 
-                      
+
                       [DSCLocalConfigurationManager()]
                       Configuration LCMConfig
                       {
@@ -1513,17 +1525,17 @@ Resources:
                               Settings {
                                   RefreshMode                    = 'Push'
                                   ConfigurationModeFrequencyMins = 15
-                                  ActionAfterReboot              = 'StopConfiguration'                      
+                                  ActionAfterReboot              = 'StopConfiguration'
                                   RebootNodeIfNeeded             = $false
                                   ConfigurationMode              = 'ApplyAndAutoCorrect'
-                                  CertificateId                  = $DscCertThumbprint  
+                                  CertificateId                  = $DscCertThumbprint
                               }
                           }
                       }
-                      
+
                       Write-Output 'Generating MOF file for LCM'
                       LCMConfig -OutputPath 'C:\Temp\LCMConfig'
-                          
+
                       Write-Output 'Sets LCM configuration to MOF generated in previous command'
                       Try {
                           Set-DscLocalConfigurationManager -Path 'C:\Temp\LCMConfig' -ErrorAction Stop
@@ -1594,7 +1606,7 @@ Resources:
                           Write-Output "Failed to get DSC cert thumbprint $_"
                           Exit 1
                       }
-                      
+
                       Write-Output 'Creating configuration data block that has the certificate information for DSC configuration processing'
                       $ConfigurationData = @{
                           AllNodes = @(
@@ -1609,7 +1621,7 @@ Resources:
                               }
                           )
                       }
-                      
+
                       Configuration ConfigInstance {
                           Import-DscResource -ModuleName 'PSDesiredStateConfiguration', 'NetworkingDsc', 'ComputerManagementDsc', 'DnsServerDsc', 'ActiveDirectoryDsc'
                           Node LocalHost {
