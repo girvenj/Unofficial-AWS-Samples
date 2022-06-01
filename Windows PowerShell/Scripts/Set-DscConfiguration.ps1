@@ -15,7 +15,7 @@
  .\Set-DscConfiguration.ps1
  #>
 
-Param (
+ Param (
     [Bool]$RebootNodeIfNeeded = $False
 )
 
@@ -44,14 +44,13 @@ Try {
     Exit 1
 }
 
-$KtVersion = Invoke-WebRequest 'https://github.com/awslabs/kinesis-agent-windows/releases/latest' -Headers @{"Accept"="application/json"} -UseBasicParsing | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'tag_name'
-$KtVersionMinusV = $KtVersion.Substring(1)
+$KtVersion = (Invoke-WebRequest 'https://s3-us-west-2.amazonaws.com/kinesis-agent-windows/downloads/packages.json' -Headers @{"Accept" = "application/json" } -UseBasicParsing | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'Packages').Version[0]
 
 #==================================================
 # Functions
 #==================================================
 
-#Requires -Modules PSDscResources, Module-DSC, PSDesiredStateConfiguration, NetworkingDsc, ComputerManagementDsc, 'SChannelDsc'
+#Requires -Modules PSDscResources, Module-DSC, PSDesiredStateConfiguration, NetworkingDsc, ComputerManagementDsc, 'SChannelDsc', 'AuditPolicyDsc'
 
 #==================================================
 # Configurations
@@ -77,16 +76,6 @@ Configuration AwsDriversInstall {
             DeviceName    = 'AWS PV Drivers'
             DriverVersion = '8.4.1'
             URL           = 'https://s3.amazonaws.com/ec2-windows-drivers-downloads/AWSPV/Latest/AWSPVDriver.zip'
-        }
-    }
-}
-
-Configuration CipherSuitesDsc {
-    Import-DscResource -ModuleName 'Module-DSC'
-    Node LocalHost {
-        SetCipherSuite 3DESCipher {
-            Ensure    = 'Absent'  
-            ValueName = 'TLS_RSA_WITH_3DES_EDE_CBC_SHA'
         }
     }
 }
@@ -474,22 +463,6 @@ Configuration RegistrySettingsDscNewModule {
             ValueData = 'true'
             Force     = $true
         }
-        Registry TLS13-Client {
-            Ensure    = 'Present'  
-            Key       = 'HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.3\Client'
-            ValueName = 'Enabled'
-            ValueType = 'Dword'
-            ValueData = '1'
-            Force     = $true
-        }
-        Registry TLS13-Server {
-            Ensure    = 'Present'  
-            Key       = 'HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.3\Server'
-            ValueName = 'Enabled'
-            ValueType = 'Dword'
-            ValueData = '1'
-            Force     = $true
-        }
         If ($OsInstall -eq 'Server') {
             Registry Chrome-TLS {
                 Ensure    = 'Present'  
@@ -535,49 +508,81 @@ Configuration RegistrySettingsDscOldModule {
 Configuration SChannelDsc {
     Import-DscResource -ModuleName 'SChannelDsc'
     Protocol DisableSSLv3 {
-        Protocol          = 'SSL 3.0'
-        IncludeClientSide = $true
-        State             = 'Disabled'
+        Protocol           = 'SSL 3.0'
+        IncludeClientSide  = $true
+        State              = 'Disabled'
+        RebootWhenRequired = $true
     }
     Protocol DisableTLS1 {
-        Protocol          = 'TLS 1.0' 
-        IncludeClientSide = $true
-        State             = 'Disabled'
+        Protocol           = 'TLS 1.0' 
+        IncludeClientSide  = $true
+        State              = 'Disabled'
+        RebootWhenRequired = $true
     }
     Protocol DisableTLS11 {
-        Protocol          = 'TLS 1.1'
-        IncludeClientSide = $true
-        State             = 'Disabled'
+        Protocol           = 'TLS 1.1'
+        IncludeClientSide  = $true
+        State              = 'Disabled'
+        RebootWhenRequired = $true
     }
     Protocol EnableTLS12 {
-        Protocol          = 'TLS 1.2'
-        IncludeClientSide = $true
-        State             = 'Enabled'
+        Protocol           = 'TLS 1.2'
+        IncludeClientSide  = $true
+        State              = 'Enabled'
+        RebootWhenRequired = $true
     }
+    Protocol EnableTLS13 {
+        Protocol           = 'TLS 1.3'
+        IncludeClientSide  = $true
+        State              = 'Enabled'
+        RebootWhenRequired = $true
+    }    
     Cipher DisableRC4-40 {
-        Cipher = 'RC4 40/128'
-        State  = 'Disabled'
+        Cipher             = 'RC4 40/128'
+        State              = 'Disabled'
+        RebootWhenRequired = $true
     }
     Cipher DisableRC4-56 {
-        Cipher = 'RC4 56/128'
-        State  = 'Disabled'
+        Cipher             = 'RC4 56/128'
+        State              = 'Disabled'
+        RebootWhenRequired = $true
     }
     Cipher DisableRC4-64 {
-        Cipher = 'RC4 64/128'
-        State  = 'Disabled'
+        Cipher             = 'RC4 64/128'
+        State              = 'Disabled'
+        RebootWhenRequired = $true
     }
     Cipher DisableRC4-128 {
-        Cipher = 'RC4 128/128'
-        State  = 'Disabled'
+        Cipher             = 'RC4 128/128'
+        State              = 'Disabled'
+        RebootWhenRequired = $true
     }
     Cipher Disable3Des {
-        Cipher = 'Triple DES 168'
-        State  = 'Disabled'
+        Cipher             = 'Triple DES 168'
+        State              = 'Disabled'
+        RebootWhenRequired = $true
+    }
+    Cipher EnableAES128 {
+        Cipher             = 'AES 128/128'
+        State              = 'Enabled'
+        RebootWhenRequired = $true
+    }
+    Cipher EnableAES256 {
+        Cipher             = 'AES 256/256'
+        State              = 'Enabled'
+        RebootWhenRequired = $true
+    }
+    CipherSuites 3DESCipher {
+        IsSingleInstance   = 'Yes'
+        CipherSuitesOrder  = 'TLS_RSA_WITH_3DES_EDE_CBC_SHA'
+        Ensure             = 'Absent'
+        RebootWhenRequired = $true
     }
     SChannelSettings 'ConfigureSChannel' {
         IsSingleInstance              = 'Yes'
         TLS12State                    = 'Enabled'
         WinHttpDefaultSecureProtocols = @('TLS1.2')
+        RebootWhenRequired            = $true
     }
 }
 
@@ -593,8 +598,8 @@ Configuration SoftwareInstall {
         MsiInstaller KinesisAgent {
             Ensure          = 'Present'  
             SoftwareName    = 'Amazon Kinesis Agent for Microsoft Windows'
-            SoftwareVersion = $KtVersionMinusV
-            URL             = "https://github.com/awslabs/kinesis-agent-windows/releases/download/$KtVersion/AWSKinesisTap.$KtVersionMinusV.msi"
+            SoftwareVersion = $KtVersion
+            URL             = "https://s3-us-west-2.amazonaws.com/kinesis-agent-windows/downloads/AWSKinesisTap.$KtVersion.msi"
         }
         <#MsiInstaller CWAgent {
             Ensure          = 'Present'  
@@ -672,18 +677,583 @@ Configuration WindowsFeaturesDsc {
     }
 }
 
-<#If ($AmIaDC) {
-    Configuration AdvAdudit {
-        Import-DscResource -ModuleName 'Module-DSC'
+If ($AmIaDC) {
+    Configuration DcAdvAudit {
+        Import-DscResource -ModuleName 'AuditPolicyDsc'
         Node LocalHost {
-            SetAdvAudit CredVal {
-                Ensure   = 'Present'  
-                Category = 'Credential Validation'
-                Setting  = 'Success and Failure'
+            AuditPolicySubcategory CredentialValidationSuccess {
+                Name      = 'Credential Validation'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory CredentialValidationFailure {
+                Name      = 'Credential Validation'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory KerberosAuthenticationServiceSuccess {
+                Name      = 'Kerberos Authentication Service'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory KerberosAuthenticationServiceFailure {
+                Name      = 'Kerberos Authentication Service'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory KerberosServiceTicketOperationsSuccess {
+                Name      = 'Kerberos Service Ticket Operations'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory KerberosServiceTicketOperationsFailure {
+                Name      = 'Kerberos Service Ticket Operations'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory OtherAccountLogonEventsSuccess {
+                Name      = 'Other Account Logon Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory OtherAccountLogonEventsFailure {
+                Name      = 'Other Account Logon Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory ApplicationGroupManagementSuccess {
+                Name      = 'Application Group Management'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory ApplicationGroupManagementFailure {
+                Name      = 'Application Group Management'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory ComputerAccountManagementSuccess {
+                Name      = 'Computer Account Management'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory ComputerAccountManagementFailure {
+                Name      = 'Computer Account Management'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory DistributionGroupManagementSuccess {
+                Name      = 'Distribution Group Management'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory DistributionGroupManagementFailure {
+                Name      = 'Distribution Group Management'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory OtherAccountManagementEventsSuccess {
+                Name      = 'Other Account Management Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory OtherAccountManagementEventsFailure {
+                Name      = 'Other Account Management Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory SecurityGroupManagementSuccess {
+                Name      = 'Security Group Management'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory SecurityGroupManagementFailure {
+                Name      = 'Security Group Management'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory UserAccountManagementSuccess {
+                Name      = 'User Account Management'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory UserAccountManagementFailure {
+                Name      = 'User Account Management'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory DPAPIActivitySuccess {
+                Name      = 'DPAPI Activity'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory DPAPIActivityFailure {
+                Name      = 'DPAPI Activity'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory PNPActivitySuccess {
+                Name      = 'Plug and Play Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory PNPActivityFailure {
+                Name      = 'Plug and Play Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory ProcessCreationSuccess {
+                Name      = 'Process Creation'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory ProcessCreationFailure {
+                Name      = 'Process Creation'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory ProcessTerminationSuccess {
+                Name      = 'Process Termination'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory ProcessTerminationFailure {
+                Name      = 'Process Termination'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory RPCEventsSuccess {
+                Name      = 'RPC Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory RPCEventsFailure {
+                Name      = 'RPC Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory TokenRightAdjustedSuccess {
+                Name      = 'Token Right Adjusted Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory TokenRightAdjustedFailure {
+                Name      = 'Token Right Adjusted Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory DetailedDirectoryServiceReplicationSuccess {
+                Name      = 'Detailed Directory Service Replication'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory DetailedDirectoryServiceReplicationFailure {
+                Name      = 'Detailed Directory Service Replication'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory DirectoryServiceAccessSuccess {
+                Name      = 'Directory Service Access'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory DirectoryServiceAccessFailure {
+                Name      = 'Directory Service Access'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory DirectoryServiceChangesSuccess {
+                Name      = 'Directory Service Changes'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory DirectoryServiceChangesFailure {
+                Name      = 'Directory Service Changes'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory DirectoryServiceReplicationSuccess {
+                Name      = 'Directory Service Replication'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory DirectoryServiceReplicationFailure {
+                Name      = 'Directory Service Replication'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory AccountLockoutSuccess {
+                Name      = 'Account Lockout'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory AccountLockoutFailure {
+                Name      = 'Account Lockout'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory UserDeviceClaimsSuccess {
+                Name      = 'User / Device Claims'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory UserDeviceClaimsFailure {
+                Name      = 'User / Device Claims'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory GroupMembershipSuccess {
+                Name      = 'Group Membership'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory GroupMembershipFailure {
+                Name      = 'Group Membership'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory IPsecExtendedModeSuccess {
+                Name      = 'IPsec Extended Mode'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory IPsecExtendedModeFailure {
+                Name      = 'IPsec Extended Mode'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory IPsecMainModeSuccess {
+                Name      = 'IPsec Main Mode'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory IPsecMainModeFailure {
+                Name      = 'IPsec Main Mode'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory IPsecQuickModeSuccess {
+                Name      = 'IPsec Quick Mode'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory IPsecQuickModeFailure {
+                Name      = 'IPsec Quick Mode'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory LogoffSuccess {
+                Name      = 'Logoff'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory Logoffailure {
+                Name      = 'Logoff'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory LogonSuccess {
+                Name      = 'Logon'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory LogonFailure {
+                Name      = 'Logon'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory NetworkPolicyServerSuccess {
+                Name      = 'Network Policy Server'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory NetworkPolicyServerFailure {
+                Name      = 'Network Policy Server'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory OtherLogonLogoffEventsSuccess {
+                Name      = 'Other Logon/Logoff Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory OtherLogonLogoffEventsFailure {
+                Name      = 'Other Logon/Logoff Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory SpecialLogonSuccess {
+                Name      = 'Special Logon'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory SpecialLogonFailure {
+                Name      = 'Special Logon'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory ApplicationGeneratedSuccess {
+                Name      = 'Application Generated'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory ApplicationGeneratedFailure {
+                Name      = 'Application Generated'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory CertificationServicesSuccess {
+                Name      = 'Certification Services'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory CertificationServicesFailure {
+                Name      = 'Certification Services'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory DetailedFileShareSuccess {
+                Name      = 'Detailed File Share'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory DetailedFileShareFailure {
+                Name      = 'Detailed File Share'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory FileShareSuccess {
+                Name      = 'File Share'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory FileShareFailure {
+                Name      = 'File Share'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory FileSystemSuccess {
+                Name      = 'File System'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory FileSystemFailure {
+                Name      = 'File System'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory FilteringPlatformConnectionSuccess {
+                Name      = 'Filtering Platform Connection'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory FilteringPlatformConnectionFailure {
+                Name      = 'Filtering Platform Connection'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory FilteringPlatformPacketDropSuccess {
+                Name      = 'Filtering Platform Packet Drop'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory FilteringPlatformPacketDropFailure {
+                Name      = 'Filtering Platform Packet Drop'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory HandleManipulationSuccess {
+                Name      = 'Handle Manipulation'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory HandleManipulationFailure {
+                Name      = 'Handle Manipulation'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory KernelObjectSuccess {
+                Name      = 'Kernel Object'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory KernelObjectFailure {
+                Name      = 'Kernel Object'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory OtherObjectAccessEventsSuccess {
+                Name      = 'Other Object Access Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory OtherObjectAccessEventsFailure {
+                Name      = 'Other Object Access Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory RegistrySuccess {
+                Name      = 'Registry'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory RegistryFailure {
+                Name      = 'Registry'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory RemovableStorageSuccess {
+                Name      = 'Removable Storage'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory RemovableStorageFailure {
+                Name      = 'Removable Storage'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory CentralAccessPolicyStagingSuccess {
+                Name      = 'Central Policy Staging'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory CentralAccessPolicyStagingFailure {
+                Name      = 'Central Policy Staging'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory AuditPolicyChangeSuccess {
+                Name      = 'Audit Policy Change'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory AuditPolicyChangeFailure {
+                Name      = 'Audit Policy Change'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory AuthenticationPolicyChangeSuccess {
+                Name      = 'Authentication Policy Change'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory AuthenticationPolicyChangeFailure {
+                Name      = 'Authentication Policy Change'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory AuthorizationPolicyChangeSuccess {
+                Name      = 'Authorization Policy Change'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory AuthorizationPolicyChangeFailure {
+                Name      = 'Authorization Policy Change'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory MPSSVCRule-LevelPolicyChangeSuccess {
+                Name      = 'MPSSVC Rule-Level Policy Change'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory MPSSVCRule-LevelPolicyChangeFailure {
+                Name      = 'MPSSVC Rule-Level Policy Change'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory OtherPolicyChangeEventsSuccess {
+                Name      = 'Other Policy Change Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory OtherPolicyChangeEventsFailure {
+                Name      = 'Other Policy Change Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory NonSensitivePrivilegeUseSuccess {
+                Name      = 'Non Sensitive Privilege Use'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory NonSensitivePrivilegeUseFailure {
+                Name      = 'Non Sensitive Privilege Use'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory OtherPrivilegeUseEventsSuccess {
+                Name      = 'Other Privilege Use Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory OtherPrivilegeUseEventsFailure {
+                Name      = 'Other Privilege Use Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory SensitivePrivilegeUseSuccess {
+                Name      = 'Sensitive Privilege Use'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory SensitivePrivilegeUseFailure {
+                Name      = 'Sensitive Privilege Use'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory IPsecDriverSuccess {
+                Name      = 'IPsec Driver'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory IPsecDriverFailure {
+                Name      = 'IPsec Driver'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory OtherSystemEventsSuccess {
+                Name      = 'Other System Events'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory OtherSystemEventsFailure {
+                Name      = 'Other System Events'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory SecurityStateChangeSuccess {
+                Name      = 'Security State Change'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory SecurityStateChangeFailure {
+                Name      = 'Security State Change'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory SecuritySystemExtensionSuccess {
+                Name      = 'Security System Extension'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory SecuritySystemExtensionFailure {
+                Name      = 'Security System Extension'
+                AuditFlag = 'Failure'
+                Ensure    = 'Absent'
+            }
+            AuditPolicySubcategory SystemIntegritySuccess {
+                Name      = 'System Integrity'
+                AuditFlag = 'Success'
+                Ensure    = 'Present'
+            }
+            AuditPolicySubcategory SystemIntegrityFailure {
+                Name      = 'System Integrity'
+                AuditFlag = 'Failure'
+                Ensure    = 'Present'
             }
         }
     }
-}#>
+}
 
 #==================================================
 # DSC Local Configuration Manager
@@ -744,12 +1314,12 @@ Configuration LCM {
             RefreshMode = 'Push'
             Description = 'Ensure Features are not installed'
         }
-        <#If ($AmIaDC) {
-            PartialConfiguration AdvAdudit {
+        If ($AmIaDC) {
+            PartialConfiguration DcAdvAudit {
                 RefreshMode = 'Push'
                 Description = 'Ensures Advance Audit Policy is Set'
             }
-        }#>
+        }
     }
 }
 
@@ -780,9 +1350,9 @@ $PartialConfigs = @(
     'SChannelDsc'
     'SoftwareInstall'
     'WindowsFeaturesDsc'
-    <#If ($AmIaDC) {
-        'AdvAdudit'
-    }#>
+    If ($AmIaDC) {
+        'DcAdvAudit'
+    }
 )
 
 Foreach ($PartialConfig in $PartialConfigs) {

@@ -1284,7 +1284,6 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       ImageId: !Ref AMI
       InstanceType: t3.large
-      KeyName: ee-default-keypair
       SecurityGroupIds:
         - !Ref DomainMemberSG
       SubnetId: !Ref VPCPublicSubnet1Subnet
@@ -2185,7 +2184,6 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       ImageId: !Ref AMI
       InstanceType: t3.medium
-      KeyName: ee-default-keypair
       SecurityGroupIds:
         - Ref: OnPremDomainControllerSG
       SubnetId: !Ref VPCPublicSubnet1Subnet
