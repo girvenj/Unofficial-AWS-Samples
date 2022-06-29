@@ -945,9 +945,9 @@ Function New-ManagedADTrust {
                 Start-Sleep -Seconds 10
             }
         }
-    } Until ($Counter -ge 30 -or $Stage -eq 'Verified' -or $Stage -eq 'Failed')
+    } Until ($Counter -ge 30 -or $State -eq 'Verified' -or $State -eq 'Failed')
     
-    If ($Counter -ge 30 -or $Stage -eq 'Failed') {
+    If ($Counter -ge 30 -or $State -eq 'Failed') {
         Write-ToLog -Message "AWS Managed Active Microsoft Directory failed to create trust in $Region.  Manually check the AWS Managed Microsoft Active Directory and see if action is need and try again" -Type 'ERROR' -Exit
     }
     

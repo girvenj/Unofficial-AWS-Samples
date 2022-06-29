@@ -1387,7 +1387,7 @@ Resources:
                           }
                       }
                       Write-Output 'Generating MOF file'
-                      ConfigInstance -OutputPath 'C:\Temp\AuditConfigInstance' -ConfigurationData $ConfigurationData
+                      $Null = ConfigInstance -OutputPath 'C:\Temp\AuditConfigInstance' -ConfigurationData $ConfigurationData
                   }
 
                   Function Invoke-DscStatusCheck {
@@ -3170,7 +3170,7 @@ Resources:
                       }
 
                       Write-Output 'Generating MOF file for LCM'
-                      LCMConfig -OutputPath 'C:\Temp\LCMConfig'
+                      $Null = LCMConfig -OutputPath 'C:\Temp\LCMConfig'
 
                       Write-Output 'Sets LCM configuration to MOF generated in previous command'
                       Try {
@@ -3394,9 +3394,10 @@ Resources:
                           AllNodes = @(
                               @{
                                   NodeName             = '*'
-                                  CertificateFile      = 'C:\Temp\publickeys\DscPublicKey.cer'
-                                  Thumbprint           = $DscCertThumbprint
+                                  #CertificateFile      = 'C:\Temp\publickeys\DscPublicKey.cer'
+                                  #Thumbprint           = $DscCertThumbprint
                                   PSDscAllowDomainUser = $true
+                                  PsDscAllowPlainTextPassword = $true
                               },
                               @{
                                   NodeName = 'localhost'
@@ -3551,7 +3552,7 @@ Resources:
                                       }    
                                       'ChildDomainController' {
                                           ADDomain PrimaryDC {
-                                              DomainName                    = $DomainNetBIOSName
+                                              DomainName                    = $DomainNetBIOSName.ToLower()
                                               DomainNetBIOSName             = $DomainNetBIOSName
                                               ParentDomainName              = $ParentDomainDNSName
                                               Credential                    = $EaCredentials
@@ -3727,7 +3728,7 @@ Resources:
                           }
                       }
                       Write-Output 'Generating MOF file'
-                      ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
+                      $Null = ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
                   }
 
                   Function Invoke-DscStatusCheck {

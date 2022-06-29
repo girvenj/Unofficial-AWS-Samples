@@ -706,7 +706,7 @@ Resources:
                       }
 
                       Write-Output 'Generating MOF file for LCM'
-                      LCMConfig -OutputPath 'C:\Temp\LCMConfig'
+                      $Null = LCMConfig -OutputPath 'C:\Temp\LCMConfig'
                           
                       Write-Output 'Sets LCM configuration to MOF generated in previous command'
                       Try {
@@ -780,9 +780,10 @@ Resources:
                           AllNodes = @(
                               @{
                                   NodeName             = '*'
-                                  CertificateFile      = 'C:\Temp\publickeys\AWSQSDscPublicKey.cer'
-                                  Thumbprint           = $DscCertThumbprint
+                                  #CertificateFile      = 'C:\Temp\publickeys\AWSQSDscPublicKey.cer'
+                                  #Thumbprint           = $DscCertThumbprint
                                   PSDscAllowDomainUser = $true
+                                  PsDscAllowPlainTextPassword = $true
                               },
                               @{
                                   NodeName = 'localhost'
@@ -865,7 +866,7 @@ Resources:
                           }
                       }
                       Write-Output 'Generating MOF file'
-                      ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
+                      $Null = ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
                   }
 
                   $AltSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAltUserSecParamName}}'
@@ -1533,7 +1534,7 @@ Resources:
                       }
 
                       Write-Output 'Generating MOF file for LCM'
-                      LCMConfig -OutputPath 'C:\Temp\LCMConfig'
+                      $Null = LCMConfig -OutputPath 'C:\Temp\LCMConfig'
 
                       Write-Output 'Sets LCM configuration to MOF generated in previous command'
                       Try {
@@ -1611,9 +1612,10 @@ Resources:
                           AllNodes = @(
                               @{
                                   NodeName             = '*'
-                                  CertificateFile      = 'C:\Temp\publickeys\AWSQSDscPublicKey.cer'
-                                  Thumbprint           = $DscCertThumbprint
+                                  #CertificateFile      = 'C:\Temp\publickeys\AWSQSDscPublicKey.cer'
+                                  #Thumbprint           = $DscCertThumbprint
                                   PSDscAllowDomainUser = $true
+                                  PsDscAllowPlainTextPassword = $true
                               },
                               @{
                                   NodeName = 'localhost'
@@ -1795,7 +1797,7 @@ Resources:
                           }
                       }
                       Write-Output 'Generating MOF file'
-                      ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
+                      $Null = ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
                   }
 
                   $DaSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAdminSecParamName}}'
@@ -1881,9 +1883,10 @@ Resources:
                           AllNodes = @(
                               @{
                                   NodeName             = '*'
-                                  CertificateFile      = 'C:\Temp\publickeys\AWSQSDscPublicKey.cer'
-                                  Thumbprint           = $DscCertThumbprint
+                                  #CertificateFile      = 'C:\Temp\publickeys\AWSQSDscPublicKey.cer'
+                                  #Thumbprint           = $DscCertThumbprint
                                   PSDscAllowDomainUser = $true
+                                  PsDscAllowPlainTextPassword = $true
                               },
                               @{
                                   NodeName = 'localhost'
@@ -1924,7 +1927,7 @@ Resources:
                           }
                       }
                       Write-Output 'Generating MOF file'
-                      ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
+                      $Null = ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
                   }
 
                   Function Invoke-Cleanup {
