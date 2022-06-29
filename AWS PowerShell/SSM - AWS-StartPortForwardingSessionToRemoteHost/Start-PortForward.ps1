@@ -3,8 +3,8 @@
         Start-PortForward.ps1
 
     .DESCRIPTION
-        This script executes an SSM automation document named "PortForward" which will create a temporary port forwarding instance. 
-        Launch the AWS CLI and call AWS-StartPortForwardingSessionToRemoteHost in a new window.
+        This script creates an temporary port forwarding instance. 
+        Launches the AWS CLI and calls AWS-StartPortForwardingSessionToRemoteHost in a new window.
         Once the AWS CLI window is closed it will then terminate the temporary port forwarding instance.
         
         This script requires the following:
