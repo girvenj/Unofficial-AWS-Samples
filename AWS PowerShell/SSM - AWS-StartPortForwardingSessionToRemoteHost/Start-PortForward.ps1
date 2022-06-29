@@ -3,9 +3,19 @@
         Start-PortForward.ps1
 
     .DESCRIPTION
-        This script execute an SSM automation document named "PortForward" which will create a temporary port forwarding instance. 
+        This script executes an SSM automation document named "PortForward" which will create a temporary port forwarding instance. 
         Launch the AWS CLI and call AWS-StartPortForwardingSessionToRemoteHost in a new window.
-        Once the AWS CLI window has been closed it will then terminate the temporary port forwarding instance.
+        Once the AWS CLI window is closed it will then terminate the temporary port forwarding instance.
+        
+        This script requires the following:
+         * The AWS CLI installed (https://aws.amazon.com/cli/)
+         * The AWS Session Manager plugin for the AWS CLI installed (https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+         * Either Windows PowerShell 5.1 and newer for Windows OS or PowerShell Core 6.0 and newer for macOS and Linux (https://github.com/PowerShell/PowerShell)
+         * The following AWS PowerShell Modules (https://docs.aws.amazon.com/powershell/latest/userguide/pstools-getting-set-up.html)
+            *  AWS.Tools.Common
+            *  AWS.Tools.EC2
+            *  AWS.Tools.KeyManagementService
+            *  AWS.Tools.SimpleSystemsManagement            
 
     .EXAMPLE
         .\Start-PortForward.ps1 -IamRole 'SSMCore' -InstanceType 't4g.small' -KeyName 'Baseline' -KmsKeyId 'alias/aws/ebs' -LocalPortNumber '55677' -Region 'us-west-2' -RemotePortNumber '5432' -SecurityGroupId 'sg-1234567890adbdefg' -SubnetId 'subnet-1234567890adbdefg' -TargetHost 'database.rds.amazonaws.com'
@@ -14,6 +24,8 @@
         Author: Amazon Web Services
         Date: 06/29/2022
 #>
+
+#Requires -Modules 'AWS.Tools.Common', 'AWS.Tools.EC2', 'AWS.Tools.KeyManagementService', 'AWS.Tools.SimpleSystemsManagement'
 
 [CmdletBinding()]
 Param (
