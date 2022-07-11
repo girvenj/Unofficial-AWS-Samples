@@ -62,12 +62,16 @@ Parameters:
     Default: 'No'
     Description: Deploy & Integrate Amazon RDS SQL Server Instance with AWS Managed Microsoft AD
     Type: String
-  FsxOnpremOu:
+  FsxOnpremParentOu:
     Default: DC=onpremises,DC=local
-    Description: Parent DN for Amazon FSX for Windows OU (Only used when deployment with On-Premises AD)
+    Description: Parent OU DN for Amazon FSX for Windows OU (Only used when deployment with On-Premises AD)
+    Type: String
+  InstanceType:
+    Default: m6i.large
+    Description: EC2 Instance type used for all instances
     Type: String
   MadDomainName:
-    AllowedPattern: ^([a-zA-Z0-9]+[\\.-])+([a-zA-Z0-9])+$
+    AllowedPattern: ^([a-zA-Z0-9]+(-[a-zA-Z0-9]+)*\.)+[a-zA-Z]{2,}$
     Default: corp.example.com
     Description: Fully qualified domain name (FQDN) of the AWS Managed Microsoft AD domain e.g. corp.example.com
     MaxLength: '255'
@@ -88,7 +92,7 @@ Parameters:
     MinLength: '1'
     Type: String
   OnpremDomainName:
-    AllowedPattern: ^([a-zA-Z0-9]+[\\.-])+([a-zA-Z0-9])+$
+    AllowedPattern: ^([a-zA-Z0-9]+(-[a-zA-Z0-9]+)*\.)+[a-zA-Z]{2,}$
     Default: onpremises.local
     Description: Fully qualified domain name (FQDN) of the On-Premises domain e.g. onpremises.local
     MaxLength: '255'
@@ -104,7 +108,8 @@ Parameters:
   TrustDirection:
     AllowedValues:
       - Two-Way
-      - One-Way
+      - 'One-Way: Incoming'
+      - 'One-Way: Outgoing'
     Default: Two-Way
     Description: Trust Direction from AWS Managed Microsoft AD to on-premises domain.
     Type: String
@@ -115,6 +120,7 @@ Metadata:
           default: Main Configuration
         Parameters:
           - AMI
+          - InstanceType
           - MadDomainName
           - MadNetBiosName
           - OnpremDomainName
@@ -130,24 +136,26 @@ Metadata:
           - IntegrateRdsMad
           - IntegrateFsxMad
           - IntegrateFsxOnprem
-          - FsxOnpremOu
+          - FsxOnpremParentOu
     ParameterLabels:
       AMI:
         default: SSM Parameter Value for Latest AMI ID
       CreateChildDomain:
-        default: Create On-Premises child domain
+        default: Create On-Premises Child Domain
       DeployMadPki:
         default: Deploy PKI for AWS Managed Microsoft AD
       DeployOnpremPki:   
         default: Deploy PKI for On-Premises AD
+      InstanceType:
+        default: EC2 Instance Type
       IntegrateFsxMad:
         default: Deploy FSX for Windows for AWS Managed Microsoft AD
       IntegrateFsxOnprem:
         default: Deploy FSX for Windows for On-Premises AD
       IntegrateRdsMad:
         default: Deploy Amazon RDS SQL Server Instance for AWS Managed Microsoft AD
-      FsxOnpremOu:
-        default: OU for Amazon FSX for Windows deployment for On-Premises AD
+      FsxOnpremParentOu:
+        default: Parent OU DN for Amazon FSX for Windows deployment for On-Premises AD
       MadDomainName:
         default: AWS Managed Microsoft AD Domain DNS Name
       MadNetBiosName:
@@ -178,7 +186,7 @@ Resources:
       InstanceTenancy: default
       Tags:
         - Key: Name
-          Value: Demo-VPC
+          Value: !Sub Demo-VPC-${AWS::StackName}
   VPCPublicSubnet1Subnet:
     Type: AWS::EC2::Subnet
     Properties:
@@ -194,14 +202,14 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Demo-Subnet1
+          Value: !Sub Demo-VPC-Subnet1-${AWS::StackName}
       VpcId: !Ref VPC
   VPCPublicSubnet1RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       Tags:
         - Key: Name
-          Value: Demo-Subnet1
+          Value: !Sub Demo-VPC-Subnet1-RT-${AWS::StackName}
       VpcId: !Ref VPC
   VPCPublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -234,14 +242,14 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: Demo-Subnet2
+          Value: !Sub Demo-VPC-Subnet2-${AWS::StackName}
       VpcId: !Ref VPC
   VPCPublicSubnet2RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       Tags:
         - Key: Name
-          Value: Demo-Subnet2
+          Value: !Sub Demo-VPC-Subnet2-RT-${AWS::StackName}
       VpcId: !Ref VPC
   VPCPublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -264,7 +272,7 @@ Resources:
     Properties:
         Tags:
           - Key: Name
-            Value: Demo-IGW
+            Value: !Sub Demo-VPC-IGW-${AWS::StackName}
   VPCVPCGW:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
@@ -274,7 +282,7 @@ Resources:
   MadAdminSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: MadAdminSecret
+      Name: !Sub MAD-Admin-Secret-${AWS::StackName}
       Description: Password for AWS Managed Microsoft AD
       GenerateSecretString:
         SecretStringTemplate: '{"username": "Admin"}'
@@ -284,10 +292,20 @@ Resources:
   OnPremAdministratorSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: OnPremAdministratorSecret
+      Name: !Sub OnPrem-Administrator-Secret-${AWS::StackName}
       Description: Administrator Password for Onpremises AD
       GenerateSecretString:
         SecretStringTemplate: '{"username": "Administrator"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'
+  RdsAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub RDS-Admin-Secret-${AWS::StackName}
+      Description: Password for Amazon RDS Admin
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "Admin"}'
         GenerateStringKey: 'password'
         PasswordLength: 30
         ExcludeCharacters: '"@/\'
@@ -358,6 +376,7 @@ Resources:
                 Effect: Allow
                 Resource: "*"
           PolicyName: Inline-Policy
+      RoleName: !Sub Instance-Role-${AWS::StackName}
       Tags:
         - Key: StackName
           Value:
@@ -365,6 +384,7 @@ Resources:
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName: !Sub Instance-Role-${AWS::StackName}
       Path: /
       Roles:
         - Ref: InstanceRole
@@ -383,6 +403,7 @@ Resources:
       ManagedPolicyArns:
         - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonRDSDirectoryServiceAccess
       Path: /
+      RoleName: !Sub RDS-Role-${AWS::StackName}
       Tags:
         - Key: StackName
           Value:
@@ -391,147 +412,200 @@ Resources:
     Type: AWS::RDS::DBSubnetGroup
     Condition: YesIntegrateRDSwMAD
     Properties:
-      DBSubnetGroupDescription: Demo-DBSubnetGroup
+      DBSubnetGroupDescription: !Sub Demo-VPC-RDS-Subnet-Group-${AWS::StackName}
+      DBSubnetGroupName: !Sub Demo-VPC-RDS-Subnet-Group-${AWS::StackName}
       SubnetIds:
           - !Ref VPCPublicSubnet1Subnet
           - !Ref VPCPublicSubnet2Subnet
   DomainMembersSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: MAD Domain Members and RDS SG
+      GroupDescription: !Sub Demo-VPC-Domain-Members-Security-Group-${AWS::StackName}
+      GroupName: !Sub Demo-VPC-Domain-Members-Security-Group-${AWS::StackName}
       SecurityGroupIngress:
         - Description: All Local VPC Traffic
           FromPort: -1
           IpProtocol: "-1"
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: -1
         - Description: RDP Access
           FromPort: 3389
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 3389
+        - Description: WinRM Access
+          FromPort: 5985
+          IpProtocol: tcp
+          CidrIp: !GetAtt VPC.CidrBlock
+          ToPort: 5986
+      Tags:
+        - Key: Name
+          Value: !Sub Demo-VPC-Domain-Members-Security-Group-${AWS::StackName}
+      VpcId: !Ref VPC
+  RdsSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub Demo-VPC-RDS-Security-Group-${AWS::StackName}
+      GroupName: !Sub Demo-VPC-RDS-Security-Group-${AWS::StackName}
+      SecurityGroupIngress:
         - Description: SQL Access
           FromPort: 1433
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 1433
       Tags:
         - Key: Name
-          Value: DomainMembersSecurityGroup
+          Value: !Sub Demo-VPC-RDS-Security-Group-${AWS::StackName}
       VpcId: !Ref VPC
+  FsxSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub Demo-VPC-FSx-Security-Group-${AWS::StackName}
+      GroupName: !Sub Demo-VPC-FSx-Security-Group-${AWS::StackName}
+      SecurityGroupIngress:
+        - Description: FSx SMB Access
+          FromPort: 445
+          IpProtocol: tcp
+          CidrIp: !GetAtt VPC.CidrBlock
+          ToPort: 445
+        - Description: FSx WinRM Access
+          FromPort: 5985
+          IpProtocol: tcp
+          CidrIp: !GetAtt VPC.CidrBlock
+          ToPort: 5986       
+      Tags:
+        - Key: Name
+          Value: !Sub Demo-VPC-FSx-Security-Group-${AWS::StackName}
+      VpcId: !Ref VPC
+  R53SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub Demo-VPC-R53-Outbound-Resolver-Security-Group-${AWS::StackName}
+      GroupName: !Sub Demo-VPC-R53-Outbound-Resolver-Security-Group-${AWS::StackName}
+      SecurityGroupEgress:
+        - Description: FSx SMB Access
+          FromPort: 53
+          IpProtocol: udp
+          CidrIp: 0.0.0.0/0
+          ToPort: 53
+        - Description: FSx WinRM Access
+          FromPort: 53
+          IpProtocol: udp
+          CidrIp: 0.0.0.0/0
+          ToPort: 53          
+      Tags:
+        - Key: Name
+          Value: !Sub Demo-VPC-R53-Outbound-Resolver-Security-Group-${AWS::StackName}
+      VpcId: !Ref VPC   
   OnPremDomainControllerSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Domain Controllers Security Group
+      GroupDescription: !Sub Demo-VPC-Domain-Controllers-Security-Group-${AWS::StackName}
+      GroupName: !Sub Demo-VPC-Domain-Controllers-Security-Group-${AWS::StackName}
       SecurityGroupIngress:
         - Description: DNS
           FromPort: 53
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 53
         - Description: DNS
           FromPort: 53
           IpProtocol: udp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 53
         - Description: Kerberos
           FromPort: 88
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 88
         - Description: Kerberos
           FromPort: 88
           IpProtocol: udp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 88
         - Description: Windows Time
           FromPort: 123
           IpProtocol: udp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 123
-        - Description: RPC Port
+        - Description: RPC
           FromPort: 135
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 135
         - Description: Netlogon
           FromPort: 138
           IpProtocol: udp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 138
         - Description: LDAP
           FromPort: 389
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 389
         - Description: LDAP
           FromPort: 389
           IpProtocol: udp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 389
         - Description: SMB
           FromPort: 445
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 445
         - Description: SMB
           FromPort: 445
           IpProtocol: udp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 445
         - Description: Kerberos Set & Change Password
           FromPort: 464
           IpProtocol: udp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 464
         - Description: Kerberos Set & Change Password
           FromPort: 464
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 464
         - Description: LDAP over SSL
           FromPort: 636
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 636
-        - Description: LDAP Global Catalog
+        - Description: LDAP Global Catalog and GC with SSL
           FromPort: 3268
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
-          ToPort: 3268
-        - Description: LDAP Global Catalog over SSL
-          FromPort: 3269
-          IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 3269
         - Description: RDP Access
           FromPort: 3389
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 3389
         - Description: WinRM
           FromPort: 5985
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
-          ToPort: 5985
+          CidrIp: !GetAtt VPC.CidrBlock
+          ToPort: 5986
         - Description: SOAP ADWS
           FromPort: 9389
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 9389
         - Description: Random RPC
           FromPort: 49152
           IpProtocol: tcp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 65535
         - Description: Random RPC
           FromPort: 49152
           IpProtocol: udp
-          CidrIp: 10.0.0.0/24
+          CidrIp: !GetAtt VPC.CidrBlock
           ToPort: 65535
       Tags:
         - Key: Name
-          Value: DomainControllersSecurityGroup
+          Value: !Sub Domain Controllers Security Group ${AWS::StackName}
       VpcId: !Ref VPC
   OnPremDomainControllerIngress:
     Type: AWS::EC2::SecurityGroupIngress
@@ -551,11 +625,12 @@ Resources:
       IpAddresses:
         - SubnetId: !Ref VPCPublicSubnet1Subnet
         - SubnetId: !Ref VPCPublicSubnet2Subnet
+      Name: !Sub Demo-VPC-R53-Outbound-Resolver-${AWS::StackName}
       SecurityGroupIds:
         - !Ref 'DomainMembersSG'
       Tags:
         - Key: Name
-          Value: DemoR53Resolver
+          Value: !Sub Demo-VPC-R53-Outbound-Resolver-${AWS::StackName}
   AuditPolSsmAuto:
     Type: AWS::SSM::Document
     Properties:
@@ -1154,78 +1229,78 @@ Resources:
                                   Protocol           = 'SSL 3.0'
                                   IncludeClientSide  = $true
                                   State              = 'Disabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Protocol DisableTLS1 {
                                   Protocol           = 'TLS 1.0' 
                                   IncludeClientSide  = $true
                                   State              = 'Disabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Protocol DisableTLS11 {
                                   Protocol           = 'TLS 1.1'
                                   IncludeClientSide  = $true
                                   State              = 'Disabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Protocol EnableTLS12 {
                                   Protocol           = 'TLS 1.2'
                                   IncludeClientSide  = $true
                                   State              = 'Enabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Protocol EnableTLS13 {
                                   Protocol           = 'TLS 1.3'
                                   IncludeClientSide  = $true
                                   State              = 'Enabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }    
                               Cipher DisableRC4-40 {
                                   Cipher             = 'RC4 40/128'
                                   State              = 'Disabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Cipher DisableRC4-56 {
                                   Cipher             = 'RC4 56/128'
                                   State              = 'Disabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Cipher DisableRC4-64 {
                                   Cipher             = 'RC4 64/128'
                                   State              = 'Disabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Cipher DisableRC4-128 {
                                   Cipher             = 'RC4 128/128'
                                   State              = 'Disabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Cipher Disable3Des {
                                   Cipher             = 'Triple DES 168'
                                   State              = 'Disabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Cipher EnableAES128 {
                                   Cipher             = 'AES 128/128'
                                   State              = 'Enabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               Cipher EnableAES256 {
                                   Cipher             = 'AES 256/256'
                                   State              = 'Enabled'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               CipherSuites 3DESCipher {
                                   IsSingleInstance   = 'Yes'
                                   CipherSuitesOrder  = 'TLS_RSA_WITH_3DES_EDE_CBC_SHA'
                                   Ensure             = 'Absent'
-                                  RebootWhenRequired = $true
+                                  #RebootWhenRequired = $true
                               }
                               SChannelSettings 'ConfigureSChannel' {
                                   IsSingleInstance              = 'Yes'
                                   TLS12State                    = 'Enabled'
                                   WinHttpDefaultSecureProtocols = @('TLS1.2')
-                                  RebootWhenRequired            = $true
+                                  #RebootWhenRequired            = $true
                               }
                               If ($ServerRole -eq 'DomainController') {
                                   AuditPolicySubcategory KerberosAuthenticationServiceSuccess {
@@ -1399,8 +1474,15 @@ Resources:
                       }
                   }
 
+                  $AuditConfigPresent = Test-Path -Path 'C:\Temp\AuditConfigInstance'
                   Set-DscConfiguration -ServerRole '{{ServerRole}}'
-                  Start-DscConfiguration 'C:\Temp\AuditConfigInstance' -Wait -Verbose -Force
+
+                  If ($AuditConfigPresent) {
+                      Start-DscConfiguration -UseExisting -Wait -Verbose -Force
+                  } Else {
+                      Start-DscConfiguration 'C:\Temp\AuditConfigInstance' -Wait -Verbose -Force
+                  }
+                  
                   Invoke-DscStatusCheck
 
                   Try {
@@ -2071,6 +2153,9 @@ Resources:
         schemaVersion: "0.3"
         description: Deploy Enterpise CA
         parameters:
+            AdministratorSecretName:
+                description: AWS Secrets Parameter Name
+                type: String
             DeploymentType:
                 description: Type of workload being deployed
                 type: String
@@ -2079,9 +2164,6 @@ Resources:
                 type: String
             DomainType:  
                 description: Type of domain PKI will be integrated with
-                type: String
-            SecParamName:
-                description: AWS Secrets Parameter Name
                 type: String
             ServerNetBIOSName:
                 description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
@@ -2866,7 +2948,7 @@ Resources:
                       }
                   }
 
-                  $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}'
+                  $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AdministratorSecretName}}'
                   $DeploymentType = '{{DeploymentType}}'
 
                   If ($DeploymentType -eq 'EnterpriseCA' -or $DeploymentType -eq 'EnterpriseCAManagementInstance') {
@@ -2887,8 +2969,7 @@ Resources:
         schemaVersion: "0.3"
         description: Deploy AD with SSM Automation
         parameters:
-          AltSecParamName:
-            default: placeholder
+          AdministratorSecretName:
             description: AWS Secrets Parameter Name
             type: String
           DeployPki:
@@ -2907,9 +2988,9 @@ Resources:
             default: placeholder
             description: Type of domain PKI will be integrated with
             type: String
-          FsxOnpremOu:
+          FsxOnpremParentOu:
             default: placeholder
-            description: OU DN for Amazon FSX for Windows deployment with On-Premises AD
+            description: Parent OU DN for Amazon FSX for Windows deployment with On-Premises AD
             type: String
           IntegrateFsxOnprem:
             default: placeholder
@@ -2938,9 +3019,6 @@ Resources:
             default: placeholder
             description: IP Address of the forest root domain controller
             type: String
-          SecParamName:
-            description: AWS Secrets Parameter Name
-            type: String
           ServerNetBIOSName:
             description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
             type: String
@@ -2954,8 +3032,9 @@ Resources:
             default: placeholder
             description: Trust Direction from AWS Managed Microsoft AD to on-premises domain.
             type: String
-          URLSuffix:
-            description: AWS URL suffix
+          TrustSecretName:
+            default: placeholder
+            description: AWS Secrets Parameter Name
             type: String
           VPCCIDR:
             description: CIDR Block for the VPC
@@ -3324,8 +3403,6 @@ Resources:
                   Function Set-DscConfiguration {
                       [CmdletBinding()]
                       param(
-                          [Parameter(Mandatory = $false)][PSCredential]$AltAdminCredentials,
-                          [Parameter(Mandatory = $false)][String]$AltAdminUserName,
                           [Parameter(Mandatory = $true)][PSCredential]$DaCredentials,
                           [Parameter(Mandatory = $false)][PSCredential]$EaCredentials,
                           [Parameter(Mandatory = $true)][string]$DeploymentType,
@@ -3569,25 +3646,14 @@ Resources:
                                       WaitTimeout = 600
                                       DependsOn   = '[ADDomain]PrimaryDC'
                                   }
-                                  ADUser AlternateAdminUser {
-                                      Ensure                 = 'Present'
-                                      DomainName             = $DomainDnsName
-                                      UserName               = $AltAdminUserName
-                                      Password               = $AltAdminCredentials
-                                      DisplayName            = $AltAdminUserName
-                                      PasswordAuthentication = 'Negotiate'
-                                      UserPrincipalName      = "$AltAdminUserName@$DomainDnsName"
-                                      Credential             = $DaCredentials
-                                      DependsOn              ='[WaitForADDomain]WaitForPrimaryDC'
-                                  }
                                   ADGroup AddAdminToDomainAdminsGroup {
                                       Ensure           = 'Present'
                                       GroupName        = 'Domain Admins'
                                       GroupScope       = 'Global'
                                       Category         = 'Security'
-                                      MembersToInclude = @($AltAdminUserName, 'Administrator')
+                                      MembersToInclude = @('Administrator')
                                       Credential       = $DaCredentials
-                                      DependsOn        = '[ADUser]AlternateAdminUser'
+                                      DependsOn        = '[WaitForADDomain]WaitForPrimaryDC'
                                   }
                                   If ($DeploymentType -eq 'RootDomainController') {
                                       ADForestProperties TSL {
@@ -3610,18 +3676,18 @@ Resources:
                                           GroupName        = 'Enterprise Admins'
                                           GroupScope       = 'Universal'
                                           Category         = 'Security'
-                                          MembersToInclude = @($AltAdminUserName, 'Administrator')
+                                          MembersToInclude = @('Administrator')
                                           Credential       = $DaCredentials
-                                          DependsOn        = '[ADUser]AlternateAdminUser'
+                                          DependsOn        = '[WaitForADDomain]WaitForPrimaryDC'
                                       }
                                       ADGroup AddAdminToSchemaAdminsGroup {
                                           Ensure           = 'Present'
                                           GroupName        = 'Schema Admins'
                                           GroupScope       = 'Universal'
                                           Category         = 'Security'
-                                          MembersToExclude = @($AltAdminUserName, 'Administrator')
+                                          MembersToExclude = @('Administrator')
                                           Credential       = $DaCredentials
-                                          DependsOn        = '[ADUser]AlternateAdminUser'
+                                          DependsOn        = '[WaitForADDomain]WaitForPrimaryDC'
                                       }
                                       ADOptionalFeature RecycleBin {
                                           FeatureName                       = 'Recycle Bin Feature'
@@ -3740,19 +3806,17 @@ Resources:
                       }
                   }
 
-                  $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}'
+                  $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AdministratorSecretName}}'
                   $EniConfig = Get-EniConfig
                   $DeploymentType = '{{DeploymentType}}'
 
                   Switch ($DeploymentType) {
                       'RootDomainController' {
-                          $AltSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AltSecParamName}}'
-                          Set-DscConfiguration -AltAdminCredentials $AltSecret.Credentials -AltAdminUserName $AltSecret.Username -DaCredentials $Secret.DomainCredentials -DeploymentType 'RootDomainController' -DnsInstanceIP $EniConfig.DnsIpAddress -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $Secret.Credentials -MacAddress $EniConfig.MacAddress -MadDNSName '{{MadDNSName}}'-RestoreModeCredentials $Secret.Credentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
+                          Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DeploymentType 'RootDomainController' -DnsInstanceIP $EniConfig.DnsIpAddress -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $Secret.Credentials -MacAddress $EniConfig.MacAddress -MadDNSName '{{MadDNSName}}'-RestoreModeCredentials $Secret.Credentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
                       }
                       'ChildDomainController' {
-                          $AltSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AltSecParamName}}'
-                          $EaSecret = Get-SecretInfo -Domain '{{ParentDomainDNSName}}' -SecretArn '{{SecParamName}}'
-                          Set-DscConfiguration -AltAdminCredentials $AltSecret.Credentials -AltAdminUserName $AltSecret.Username -DaCredentials $Secret.DomainCredentials -DeploymentType 'ChildDomainController' -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -EaCredentials $EaSecret.DomainCredentials -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $Secret.Credentials -MacAddress $EniConfig.MacAddress -ParentDomainDNSName '{{ParentDomainDNSName}}' -ParentInstanceIP '{{ParentInstanceIP}}' -RestoreModeCredentials $Secret.Credentials -VPCCIDR '{{VPCCIDR}}'
+                          $EaSecret = Get-SecretInfo -Domain '{{ParentDomainDNSName}}' -SecretArn '{{AdministratorSecretName}}'
+                          Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DeploymentType 'ChildDomainController' -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -EaCredentials $EaSecret.DomainCredentials -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $Secret.Credentials -MacAddress $EniConfig.MacAddress -ParentDomainDNSName '{{ParentDomainDNSName}}' -ParentInstanceIP '{{ParentInstanceIP}}' -RestoreModeCredentials $Secret.Credentials -VPCCIDR '{{VPCCIDR}}'
                       } 
                       default {
                           Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DeploymentType 'Member' -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
@@ -3868,17 +3932,17 @@ Resources:
 
                           $FQDN = $Domain | Select-Object -ExpandProperty 'DNSRoot'
 
-                          $FsxOU = "OU=FSx,{{FsxOnpremOu}}"
+                          $FsxOU = "OU=FSx,{{FsxOnpremParentOu}}"
 
                           Write-Output 'Creating OU FSx'
                           Try {
-                              New-ADOrganizationalUnit -Name 'FSx' -Path '{{FsxOnpremOu}}' -ProtectedFromAccidentalDeletion $True -ErrorAction Stop
+                              New-ADOrganizationalUnit -Name 'FSx' -Path '{{FsxOnpremParentOu}}' -ProtectedFromAccidentalDeletion $True -ErrorAction Stop
                           } Catch [System.Exception] {
                               Write-Output "Failed to create OU FSx $_"
                               Exit 1
                           }
 
-                          $UserPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}').UserPassword
+                          $UserPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AdministratorSecretName}}').UserPassword
 
                           $User = @{
                               AccountPassword        = $UserPassword
@@ -3996,13 +4060,16 @@ Resources:
                           'Two-Way' {
                               $TrustDirOnprem = 'Bidirectional'
                           }
-                          'One-way' {
+                          'One-Way: Outgoing' {
                               $TrustDirOnprem = 'Inbound'
+                          }
+                          'One-Way: Incoming' {
+                              $TrustDirOnprem = 'Outbound'
                           }
                           Default { Throw 'InvalidArgument: Invalid value is passed for parameter TrustDirection' }
                       }
 
-                      $TrustPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AltSecParamName}}').UserPassword
+                      $TrustPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{TrustSecretName}}').UserPassword
 
                       Write-Output 'Creating Onprem side of trust.'
                       Invoke-TrustAction -RemoteFQDN '{{MadDNSName}}' -TrustPassword $TrustPassword $TrustDirOnprem
@@ -4031,8 +4098,11 @@ Resources:
                           'Two-Way' {
                               $TrustDirMAD = 'Two-Way'
                           }
-                          'One-way' {
+                          'One-Way: Outgoing' {
                               $TrustDirMAD = 'One-Way: Outgoing'
+                          }
+                          'One-Way: Incoming' {
+                              $TrustDirMAD = 'One-Way: Incoming'
                           }
                           Default { Throw 'InvalidArgument: Invalid value is passed for parameter TrustDirection' }
                       }
@@ -4040,7 +4110,7 @@ Resources:
                       $TrustTypeForest = New-Object -TypeName 'Amazon.DirectoryService.TrustType' -ArgumentList 'Forest'
                       $TrustDir = New-Object -TypeName 'Amazon.DirectoryService.TrustDirection' -ArgumentList $TrustDirMAD
                       $SelectiveAuthDis = New-Object -TypeName 'Amazon.DirectoryService.SelectiveAuth' -ArgumentList 'Disabled'
-                      $TrustPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecParamName}}').UserPassword
+                      $TrustPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AdministratorSecretName}}').UserPassword
 
                       Write-Output 'Creating trust between MAD and Onprem.'
                       Try {
@@ -4090,14 +4160,14 @@ Resources:
             inputs:
               DocumentName: !Ref PkiSsmAuto
               RuntimeParameters:
+                AdministratorSecretName:
+                  - '{{AdministratorSecretName}}'
                 DeploymentType:
                   - '{{DeploymentType}}'
                 DomainNetBIOSName:
                   - '{{DomainNetBIOSName}}'
                 DomainType:
                   - '{{DomainType}}'
-                SecParamName:
-                  - '{{SecParamName}}'
                 ServerNetBIOSName:
                   - '{{ServerNetBIOSName}}'
                 StackName:
@@ -4176,7 +4246,7 @@ Resources:
   RR53RuleMAD:
       Type: AWS::Route53Resolver::ResolverRule
       Properties:
-        Name: DemoR53MadRule
+        Name: !Sub R53-Rule-MAD-${AWS::StackName}
         DomainName: !Ref MadDomainName
         ResolverEndpointId: !Ref R53RROutbound
         RuleType: FORWARD
@@ -4185,7 +4255,7 @@ Resources:
           - Ip: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
         Tags:
           - Key: Name
-            Value: DemoR53MadRule
+            Value: !Sub R53-Rule-MAD-${AWS::StackName}
   RR53RRAssocMad:
     Type: AWS::Route53Resolver::ResolverRuleAssociation
     Properties:
@@ -4200,29 +4270,29 @@ Resources:
         - 0
         - Fn::GetAZs: !Ref AWS::Region
       DBInstanceClass: db.t3.xlarge
-      DBInstanceIdentifier: DemoRDSMad
+      DBInstanceIdentifier: RDS-MAD
       DBSubnetGroupName: !Ref RdsDBSubnetGroup
       Domain: !Ref ManagedAD
       DomainIAMRoleName: !Ref RDSRole
       Engine: sqlserver-se
-      EngineVersion: 15.00.4073.23.v1
+      EngineVersion: 15.00.4198.2.v1
       LicenseModel: license-included
       MasterUsername: admin
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${MadAdminSecret}:SecretString:password}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RdsAdminSecret}:SecretString:password}}'
       MultiAZ: false
       StorageType: gp2
       VPCSecurityGroups:
-        - !Ref DomainMembersSG
+        - !Ref RdsSG
       Tags:
         - Key: Name
-          Value: DemoRDSMad
+          Value: !Sub RDS-MAD-${AWS::StackName}
   FSxMAD:
     Type: AWS::FSx::FileSystem
     Condition: YesIntegrateFsxMad
     Properties:
       FileSystemType: WINDOWS
       SecurityGroupIds:
-        - !Ref DomainMembersSG
+        - !Ref FsxSG
       StorageCapacity: 32
       StorageType: SSD
       SubnetIds:
@@ -4236,7 +4306,7 @@ Resources:
         ThroughputCapacity: 16
       Tags:
         - Key: Name
-          Value: DemoFSxMad
+          Value: !Sub FSx-MAD-${AWS::StackName}
   OnPremDomainController:
     Type: AWS::EC2::Instance
     DependsOn: ManagedAD
@@ -4262,7 +4332,7 @@ Resources:
             VolumeType: gp3
       IamInstanceProfile: !Ref InstanceProfile
       ImageId: !Ref AMI
-      InstanceType: m6i.large
+      InstanceType: !Ref InstanceType
       SecurityGroupIds:
         - Ref: OnPremDomainControllerSG
       SubnetId: !Ref VPCPublicSubnet1Subnet
@@ -4278,21 +4348,20 @@ Resources:
           - |
               <powershell>
               $Params = @{
-                  AltSecParamName = '${MadAdminSecret}'
+                  AdministratorSecretName = '${OnPremAdministratorSecret}'
                   DeployPki = 'No'
                   DeploymentType = 'RootDomainController'
                   DomainDNSName = '${OnpremDomainName}'
                   DomainNetBIOSName = '${OnpremNetBiosName}'
-                  FsxOnpremOu = '${FsxOnpremOu}'
+                  FsxOnpremParentOu = '${FsxOnpremParentOu}'
                   IntegrateFsxOnprem = '${IntegrateFsxOnprem}'
                   LogicalResourceId = 'OnPremDomainController'
                   MadDNSName = '${MadDomainName}'
-                  SecParamName = '${OnPremAdministratorSecret}'
                   ServerNetBIOSName = 'ONPREM-DC01'
                   ServerRole = 'DomainController'
                   StackName = '${AWS::StackName}'
                   TrustDirection = '${TrustDirection}'
-                  URLSuffix = '${AWS::URLSuffix}'
+                  TrustSecretName = '${MadAdminSecret}'
                   VPCCIDR = '${VPCCIDR}'
               }
               Start-SSMAutomationExecution -DocumentName '${SsmAuto}' -Parameter $Params
@@ -4323,7 +4392,7 @@ Resources:
             VolumeType: gp3
       IamInstanceProfile: !Ref InstanceProfile
       ImageId: !Ref AMI
-      InstanceType: m6i.large
+      InstanceType: !Ref InstanceType
       KeyName: Baseline
       SecurityGroupIds:
         - Ref: OnPremDomainControllerSG
@@ -4340,7 +4409,7 @@ Resources:
           - |
               <powershell>
               $Params = @{
-                  AltSecParamName = '${MadAdminSecret}'
+                  AdministratorSecretName = '${OnPremAdministratorSecret}'
                   DeployPki = 'No'
                   DeploymentType = 'ChildDomainController'
                   DomainDNSName = '${ChildDomainDNSName}'
@@ -4348,11 +4417,9 @@ Resources:
                   LogicalResourceId = 'ChildOnPremDomainController'
                   ParentDomainDNSName = '${OnpremDomainName}'
                   ParentInstanceIP = '${ParentInstanceIP}'
-                  SecParamName = '${OnPremAdministratorSecret}'
                   ServerNetBIOSName = 'CHILD-DC01'
                   ServerRole = 'DomainController'
                   StackName = '${AWS::StackName}'
-                  URLSuffix = '${AWS::URLSuffix}'
                   VPCCIDR = '${VPCCIDR}'
               }
               Start-SSMAutomationExecution -DocumentName '${SsmAuto}' -Parameter $Params
@@ -4386,7 +4453,7 @@ Resources:
               DeleteOnTermination: true
         IamInstanceProfile: !Ref InstanceProfile
         ImageId: !Ref AMI
-        InstanceType: m6i.large
+        InstanceType: !Ref InstanceType
         SecurityGroupIds:
           - !Ref DomainMembersSG
         SubnetId: !Ref VPCPublicSubnet1Subnet
@@ -4402,17 +4469,16 @@ Resources:
             - |
                 <powershell>
                 $Params = @{
+                    AdministratorSecretName = '${OnPremAdministratorSecret}'
                     DeployPki = 'Yes'
                     DeploymentType = 'EnterpriseCA'
                     DomainDNSName = '${OnpremDomainName}'
                     DomainNetBIOSName = '${OnpremNetBiosName}'
                     DomainType = 'SelfManagedAD'
                     LogicalResourceId = 'OnpremPkiInstance'
-                    SecParamName = '${OnPremAdministratorSecret}'
                     ServerNetBIOSName = 'ONPREM-PKI01'
                     ServerRole = 'CertificateAuthority'
                     StackName = '${AWS::StackName}'
-                    URLSuffix = '${AWS::URLSuffix}'
                     VPCCIDR = '${VPCCIDR}'
                 }
                 Start-SSMAutomationExecution -DocumentName '${SsmAuto}' -Parameter $Params
@@ -4424,7 +4490,7 @@ Resources:
     Properties:
       FileSystemType: WINDOWS
       SecurityGroupIds:
-        - !Ref DomainMembersSG
+        - !Ref FsxSG
       StorageCapacity: 32
       StorageType: SSD
       SubnetIds:
@@ -4439,17 +4505,17 @@ Resources:
             - !GetAtt OnPremDomainController.PrivateIp
           DomainName: !Ref OnpremDomainName
           FileSystemAdministratorsGroup: FSxAdmins
-          OrganizationalUnitDistinguishedName: !Join [ ',', [ OU=FSx, !Ref FsxOnpremOu ] ]
+          OrganizationalUnitDistinguishedName: !Join [ ',', [ OU=FSx, !Ref FsxOnpremParentOu ] ]
           Password: !Sub '{{resolve:secretsmanager:${OnPremAdministratorSecret}:SecretString:password}}'
           UserName: FSxServiceAccount
         ThroughputCapacity: 16
       Tags:
         - Key: Name
-          Value: DemoFSxOnprem
+          Value: !Sub FSx-Onprem-${AWS::StackName}
   RR53RuleOnprem:
     Type: AWS::Route53Resolver::ResolverRule
     Properties:
-      Name: DemoR53OnpremRule
+      Name: !Sub R53-Rule-Onprem-${AWS::StackName}
       DomainName: !Ref OnpremDomainName
       ResolverEndpointId: !Ref R53RROutbound
       RuleType: FORWARD
@@ -4457,13 +4523,13 @@ Resources:
         - Ip: !GetAtt OnPremDomainController.PrivateIp
       Tags:
         - Key: Name
-          Value: DemoR53OnpremRule
+          Value: !Sub R53-Rule-Onprem-${AWS::StackName}
   RR53RuleChildOnprem:
     Type: AWS::Route53Resolver::ResolverRule
     Condition: YesCreateChildDomain
     DependsOn: OnPremDomainController
     Properties:
-      Name: DemoR53OnpremRule
+      Name: !Sub R53-Rule-Onprem-Child-${AWS::StackName}
       DomainName: !Join [ '.', [ !Ref OnpremChildNetBiosName, !Ref OnpremDomainName ] ]
       ResolverEndpointId: !Ref R53RROutbound
       RuleType: FORWARD
@@ -4471,7 +4537,7 @@ Resources:
         - Ip: !GetAtt ChildOnPremDomainController.PrivateIp
       Tags:
         - Key: Name
-          Value: DemoR53OnpremRule
+          Value: !Sub R53-Rule-Onprem-Child-${AWS::StackName}
   RR53RRAssocOnprem:
     Type: AWS::Route53Resolver::ResolverRuleAssociation
     Properties:
@@ -4503,7 +4569,7 @@ Resources:
               DeleteOnTermination: true
       IamInstanceProfile: !Ref InstanceProfile
       ImageId: !Ref AMI
-      InstanceType: m6i.large
+      InstanceType: !Ref InstanceType
       SecurityGroupIds:
         - !Ref DomainMembersSG
       SubnetId: !Ref VPCPublicSubnet1Subnet
@@ -4519,6 +4585,7 @@ Resources:
           - |
               <powershell>
               $Params = @{
+                  AdministratorSecretName = '${MadAdminSecret}'
                   DeployPki = 'No'
                   DeploymentType = 'ManagementInstance'
                   DomainDNSName = '${MadDomainName}'
@@ -4527,12 +4594,10 @@ Resources:
                   LogicalResourceId = 'MgmtInstance'
                   MadDirectoryID = '${ManagedAD}'
                   OnpremDomainDNSName = '${OnpremDomainName}'
-                  SecParamName = '${MadAdminSecret}'
                   ServerNetBIOSName = 'MAD-MGMT01'
                   ServerRole = 'Default'
                   StackName = '${AWS::StackName}'
                   TrustDirection = '${TrustDirection}'
-                  URLSuffix = '${AWS::URLSuffix}'
                   VPCCIDR = '${VPCCIDR}'
               }
               Start-SSMAutomationExecution -DocumentName '${SsmAuto}' -Parameter $Params
@@ -4564,7 +4629,7 @@ Resources:
             DeleteOnTermination: true
       IamInstanceProfile: !Ref InstanceProfile
       ImageId: !Ref AMI
-      InstanceType: m6i.large
+      InstanceType: !Ref InstanceType
       SecurityGroupIds:
         - !Ref DomainMembersSG
       SubnetId: !Ref VPCPublicSubnet1Subnet
@@ -4580,6 +4645,7 @@ Resources:
           - |
               <powershell>
               $Params = @{
+                  AdministratorSecretName = '${MadAdminSecret}'
                   DeployPki = 'Yes'
                   DeploymentType = 'EnterpriseCAManagementInstance'
                   DomainDNSName = '${MadDomainName}'
@@ -4588,24 +4654,49 @@ Resources:
                   LogicalResourceId = 'MgmtInstancewPki'
                   MadDirectoryID = '${ManagedAD}'
                   OnpremDomainDNSName = '${OnpremDomainName}'
-                  SecParamName = '${MadAdminSecret}'
                   ServerNetBIOSName = 'MAD-MGMT01'
                   ServerRole = 'CertificateAuthority'
                   StackName = '${AWS::StackName}'
                   TrustDirection = '${TrustDirection}'
-                  URLSuffix = '${AWS::URLSuffix}'
                   VPCCIDR = '${VPCCIDR}'
               }
               Start-SSMAutomationExecution -DocumentName '${SsmAuto}' -Parameter $Params
               </powershell>
           - VPCCIDR: !GetAtt VPC.CidrBlock
 Outputs:
+  ChildOnpremDomainControllerInstanceID:
+    Condition: YesCreateChildDomain
+    Description: Child Onprem Domain Controller Instance ID
+    Value: !Ref ChildOnPremDomainController
+  ChildOnpremDomainControllerInstancePrivateIP:
+    Condition: YesCreateChildDomain
+    Description: Child Onprem Domain Controller Instance Private IP
+    Value: !GetAtt ChildOnPremDomainController.PrivateIp
+  DomainMemberSGID:
+      Description: Domain Members Security Group ID
+      Value: !Ref DomainMembersSG
   MadAdminSecretArn:
     Description: MAD Admin Account Secret ARN
     Value: !Ref MadAdminSecret
   MADDirectoryID:
     Description: Directory Services ID
     Value: !Ref ManagedAD
+  MADMgmtInstanceID:
+    Condition: NoDeployMadPki
+    Description: MAD Mgmt Instance ID
+    Value: !Ref MgmtInstance
+  MADMgmtInstancePrivateIP:
+    Condition: NoDeployMadPki
+    Description: MAD Mgmt Instance Private IP
+    Value: !GetAtt MgmtInstance.PrivateIp
+  MADMgmtInstancewPkiID:
+    Condition: YesDeployMadPki
+    Description: MAD Mgmt Instance ID
+    Value: !Ref MgmtInstancewPki
+  MADMgmtInstancewPkiPrivateIP:
+    Condition: YesDeployMadPki
+    Description: MAD Mgmt Instance Private IP
+    Value: !GetAtt MgmtInstancewPki.PrivateIp
   MADPrivateIP1:
     Description: MAD DNS IP 1
     Value: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
@@ -4621,9 +4712,14 @@ Outputs:
   OnpremDomainControllerInstancePrivateIP:
     Description: Onprem Domain Controller Instance Private IP
     Value: !GetAtt OnPremDomainController.PrivateIp
+  OnpremPkiInstanceID:
+    Condition: YesDeployOnpremPki
+    Description: Onprem PKI Instance ID
+    Value: !Ref OnpremPkiInstance
+  OnpremPkiInstancePrivateIP:
+    Condition: YesDeployOnpremPki
+    Description: Onprem PKI Instance Private IP
+    Value: !GetAtt OnpremPkiInstance.PrivateIp
   OnPremDomainControllerSGID:
     Description: Onprem Domain Controllers Security Group ID
     Value: !Ref OnPremDomainControllerSG
-  DomainMemberSGID:
-      Description: Domain Members Security Group ID
-      Value: !Ref DomainMembersSG

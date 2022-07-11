@@ -1,0 +1,89 @@
+---
+description: Creates a Temporary Instance for Port Forwarding.
+schemaVersion: '0.3'
+parameters:
+  IamRole:
+    description: (Optional) Image Name to launch EC2 instance with
+    type: String
+  InstanceType:
+    default: t4g.small
+    description: Instance type of the temporary instance
+    type: String
+  KeyName:
+    description: PEM Keypair
+    type: String
+  KmsKeyId:
+    default: alias/aws/ebs
+    description: KMS Key for EBS Encryption
+    type: String
+  SecurityGroupId:
+    description: Security Group the temporary instance will use
+    type: StringList
+  SubnetId:
+    description: Subnet ID where the temporary instance will be deployed to
+    type: String
+mainSteps:
+  - name: getAmiId
+    action: aws:executeAwsApi
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '/aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-arm64-gp2'
+    outputs:
+    - Name: amiId
+      Selector: '$.Parameter.Value'
+      Type: 'String'
+    nextStep: launchTemporaryInstance
+  - name: launchTemporaryInstance
+    action: aws:executeAwsApi
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: '{{KmsKeyId}}'
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile: 
+         Name: '{{IamRole}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{InstanceType}}'
+      KeyName: '{{KeyName}}'
+      MaxCount: 1
+      MinCount: 1
+      SecurityGroupIds:
+        - '{{SecurityGroupId}}'
+      SubnetId: '{{SubnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: SessionManagerInstance
+    outputs:
+      - Name: InstanceId
+        Selector: '$.Instances[0].InstanceId'
+        Type: String
+    nextStep: waitForTemporaryInstanceBoot
+  - name: waitForTemporaryInstanceBoot
+    action: aws:sleep
+    inputs:
+      Duration: PT2M
+    nextStep: configureTemporaryInstance
+  - name: configureTemporaryInstance
+    action: aws:runCommand
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: '/aws/SsmAutomation/TemporaryInstance/{{automation:EXECUTION_ID}}'
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchTemporaryInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          sudo yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_arm64/amazon-ssm-agent.rpm
+outputs:
+  - launchTemporaryInstance.InstanceId
