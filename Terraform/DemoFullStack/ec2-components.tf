@@ -4,35 +4,14 @@ resource "aws_security_group" "onprem_ad_sg" {
   vpc_id      = aws_vpc.network.id
 
   dynamic "ingress" {
-    for_each = local.tcp_ad_ports
-    iterator = port
+    for_each = var.ad_ports
+    iterator = ad_ports
     content {
-      from_port   = port.value
-      to_port     = port.value
-      protocol    = "tcp"
-      cidr_blocks = [aws_vpc.network.cidr_block]
-    }
-  }
-
-  dynamic "ingress" {
-    for_each = local.udp_ad_ports
-    iterator = port
-    content {
-      from_port   = port.value
-      to_port     = port.value
-      protocol    = "udp"
-      cidr_blocks = [aws_vpc.network.cidr_block]
-    }
-  }
-
-  dynamic "ingress" {
-    for_each = local.ad_port_protocols
-    iterator = protocol
-    content {
-      from_port   = 49152
-      to_port     = 65535
-      protocol    = protocol.value
-      cidr_blocks = [aws_vpc.network.cidr_block]
+      description = ad_ports.value.description
+      from_port   = ad_ports.value.from_port
+      to_port     = ad_ports.value.to_port
+      protocol    = ad_ports.value.protocol
+      cidr_blocks = [ad_ports.value.cidr_blocks]
     }
   }
 
@@ -56,21 +35,17 @@ resource "aws_security_group" "pki_sg" {
   vpc_id      = aws_vpc.network.id
 
   dynamic "ingress" {
-    for_each = local.tcp_pki_ports
-    iterator = port
+    for_each = var.pki_ports
+    iterator = pki_ports
     content {
-      from_port   = port.value
-      to_port     = port.value
-      protocol    = "tcp"
-      cidr_blocks = [aws_vpc.network.cidr_block]
+      description = pki_ports.value.description
+      from_port   = pki_ports.value.from_port
+      to_port     = pki_ports.value.to_port
+      protocol    = pki_ports.value.protocol
+      cidr_blocks = [pki_ports.value.cidr_blocks]
     }
   }
-  ingress {
-    from_port   = 49152
-    to_port     = 65535
-    protocol    = "tcp"
-    cidr_blocks = [aws_vpc.network.cidr_block]
-  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -91,13 +66,14 @@ resource "aws_security_group" "ms_sg" {
   vpc_id      = aws_vpc.network.id
 
   dynamic "ingress" {
-    for_each = local.tcp_pki_ports
-    iterator = port
+    for_each = var.pki_ports
+    iterator = ms_ports
     content {
-      from_port   = port.value
-      to_port     = port.value
-      protocol    = "tcp"
-      cidr_blocks = [aws_vpc.network.cidr_block]
+      description = ms_ports.value.description
+      from_port   = ms_ports.value.from_port
+      to_port     = ms_ports.value.to_port
+      protocol    = ms_ports.value.protocol
+      cidr_blocks = [ms_ports.value.cidr_blocks]
     }
   }
   egress {

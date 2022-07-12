@@ -75,7 +75,7 @@ resource "aws_db_instance" "rds" {
   license_model        = "license-included"
   multi_az             = false
   password             = random_password.secret_rds.result
-  port                 = "1433"
+  port                 = var.rds_port_number
   skip_final_snapshot  = true
   storage_type         = "gp2"
   tags = {

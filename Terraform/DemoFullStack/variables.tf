@@ -100,7 +100,52 @@ variable "onprem_user_admin" {
   type        = string
 }
 
+variable "rds_port_number" {
+  description = ""
+  type        = number
+}
+
 variable "vpc_cidr" {
   description = "VPC CIDR Block"
   type        = string
+}
+
+variable "ad_ports" {
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
+}
+
+variable "ms_ports" {
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
+}
+
+variable "pki_ports" {
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
+}
+
+variable "fsx_ports" {
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
 }

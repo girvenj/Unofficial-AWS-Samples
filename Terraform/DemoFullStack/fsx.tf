@@ -4,13 +4,14 @@ resource "aws_security_group" "fsx" {
   description = "FSx Security Group"
 
   dynamic "ingress" {
-    for_each = local.tcp_fsx_ports
-    iterator = port
+    for_each = var.fsx_ports
+    iterator = fsx_ports
     content {
-      from_port   = port.value
-      to_port     = port.value
-      protocol    = "tcp"
-      cidr_blocks = [aws_vpc.network.cidr_block]
+      description = fsx_ports.value.description
+      from_port   = fsx_ports.value.from_port
+      to_port     = fsx_ports.value.to_port
+      protocol    = fsx_ports.value.protocol
+      cidr_blocks = [fsx_ports.value.cidr_blocks]
     }
   }
 
