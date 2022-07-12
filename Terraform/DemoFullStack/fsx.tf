@@ -38,17 +38,16 @@ resource "aws_fsx_windows_file_system" "mad_fsx" {
   throughput_capacity             = 16
   storage_type                    = "SSD"
   deployment_type                 = "SINGLE_AZ_2"
-  subnet_ids                      = [aws_subnet.network_subnet1.id, aws_subnet.network_subnet2.id]
+  subnet_ids                      = [aws_subnet.network_subnet1.id]
   preferred_subnet_id             = aws_subnet.network_subnet1.id
-  security_group_ids              = [aws_security_group.fsx[1].id]
+  security_group_ids              = [aws_security_group.fsx[0].id]
   tags = {
     Name = "MAD-FSx-${random_string.random_string.result}"
   }
   depends_on = [
     aws_directory_service_directory.mad,
     aws_security_group.fsx,
-    aws_subnet.network_subnet1,
-    aws_subnet.network_subnet2
+    aws_subnet.network_subnet1
   ]
 }
 
@@ -60,9 +59,9 @@ resource "aws_fsx_windows_file_system" "onprem_fsx" {
   throughput_capacity             = 16
   storage_type                    = "SSD"
   deployment_type                 = "SINGLE_AZ_2"
-  subnet_ids                      = [aws_subnet.network_subnet1.id, aws_subnet.network_subnet2.id]
+  subnet_ids                      = [aws_subnet.network_subnet1.id]
   preferred_subnet_id             = aws_subnet.network_subnet1.id
-  security_group_ids              = [aws_security_group.fsx[1].id]
+  security_group_ids              = [aws_security_group.fsx[0].id]
   tags = {
     Name = "Onprem-FSx-${random_string.random_string.result}"
   }
@@ -77,7 +76,6 @@ resource "aws_fsx_windows_file_system" "onprem_fsx" {
   depends_on = [
     aws_cloudformation_stack.instances_rootdc,
     aws_security_group.fsx,
-    aws_subnet.network_subnet1,
-    aws_subnet.network_subnet2
+    aws_subnet.network_subnet1
   ]
 }

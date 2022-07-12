@@ -344,7 +344,7 @@ Resources:
           - DomainDNSName: !Join [ '.', [ !Ref OnpremChildNetBiosName, !Ref OnpremDomainName ] ]
             DomainNetBIOSName: !Ref OnpremChildNetBiosName
             ParentDomainDNSName: !Ref OnpremDomainName
-            ParentInstanceIP: !GetAtt OnPremDomainController.PrivateIp
+            ParentInstanceIP: !Ref ParentInstanceIP
             AdministratorSecretName: !Ref OnPremAdministratorSecret
             VPCCIDR: !Ref VPCCIDR
   OnpremPkiInstance:

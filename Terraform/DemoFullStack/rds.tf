@@ -65,10 +65,9 @@ resource "aws_db_instance" "rds" {
   count                = var.mad_deploy_rds ? 1 : 0
   allocated_storage    = 20
   availability_zone    = data.aws_availability_zones.available.names[0]
-  db_name              = "demo-rds-mad"
-  db_subnet_group_name = aws_db_subnet_group.rds[1].id
+  db_subnet_group_name = aws_db_subnet_group.rds[0].id
   domain               = aws_directory_service_directory.mad.id
-  domain_iam_role_name = aws_iam_role.rds[1].name
+  domain_iam_role_name = aws_iam_role.rds[0].name
   engine               = "sqlserver-se"
   engine_version       = "15.00.4198.2.v1"
   identifier           = "demo-rds-mad"
@@ -77,7 +76,7 @@ resource "aws_db_instance" "rds" {
   multi_az             = false
   password             = random_password.secret_rds.result
   port                 = "1433"
-  security_group_names = [aws_security_group.rds[1].id]
+  security_group_names = [aws_security_group.rds[0].id]
   skip_final_snapshot  = true
   storage_type         = "gp2"
   tags = {

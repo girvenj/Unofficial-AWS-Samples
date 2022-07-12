@@ -121,7 +121,7 @@ resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule_onprem_child" {
 resource "aws_route53_resolver_rule_association" "r53_outbound_resolver_rule_onprem_child_association" {
   count            = var.onprem_create_child_domain ? 1 : 0
   name             = "Demo-VPC-Outbound-Resolver-Rule-Association-Onprem_Child-${random_string.random_string.result}"
-  resolver_rule_id = aws_route53_resolver_rule.r53_outbound_resolver_rule_onprem_child[1].id
+  resolver_rule_id = aws_route53_resolver_rule.r53_outbound_resolver_rule_onprem_child[0].id
   vpc_id           = aws_vpc.network.id
   depends_on = [
     aws_route53_resolver_rule.r53_outbound_resolver_rule_onprem_child,
