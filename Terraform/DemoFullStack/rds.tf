@@ -76,12 +76,12 @@ resource "aws_db_instance" "rds" {
   multi_az             = false
   password             = random_password.secret_rds.result
   port                 = "1433"
-  security_group_names = [aws_security_group.rds[0].id]
   skip_final_snapshot  = true
   storage_type         = "gp2"
   tags = {
     Name = "DemoRDSMad-${random_string.random_string.result}"
   }
+  vpc_security_group_ids = [aws_security_group.rds[0].id]
   username = "admin"
   depends_on = [
     aws_db_subnet_group.rds,
