@@ -18,7 +18,7 @@ output "managed_ad_ips" {
   value = aws_directory_service_directory.mad.dns_ip_addresses
 }
 
-output "managed_ad_mgmt_instance_id" {
+/*output "managed_ad_mgmt_instance_id" {
   value = join("", aws_cloudformation_stack.instances_non_rootdc.outputs[*].MADMgmtInstanceID)
 }
 
@@ -32,7 +32,7 @@ output "managed_ad_mgmt_pki_instance_id" {
 
 output "managed_ad_mgmt_pki_ip" {
   value = join("", aws_cloudformation_stack.instances_non_rootdc.outputs[*].MADMgmtInstancewPkiPrivateIP)
-}
+}*/
 
 output "managed_ad_password_secret_id" {
   value = aws_secretsmanager_secret.secret_mad.id

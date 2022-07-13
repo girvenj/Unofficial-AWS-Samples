@@ -42,6 +42,7 @@ resource "aws_fsx_windows_file_system" "mad_fsx" {
   subnet_ids                      = [aws_subnet.network_subnet1.id]
   preferred_subnet_id             = aws_subnet.network_subnet1.id
   security_group_ids              = [aws_security_group.fsx.id]
+  skip_final_backup = true
   tags = {
     Name = "MAD-FSx-${random_string.random_string.result}"
   }
@@ -63,6 +64,7 @@ resource "aws_fsx_windows_file_system" "onprem_fsx" {
   subnet_ids                      = [aws_subnet.network_subnet1.id]
   preferred_subnet_id             = aws_subnet.network_subnet1.id
   security_group_ids              = [aws_security_group.fsx.id]
+  skip_final_backup = true
   tags = {
     Name = "Onprem-FSx-${random_string.random_string.result}"
   }
@@ -70,7 +72,7 @@ resource "aws_fsx_windows_file_system" "onprem_fsx" {
     dns_ips = [aws_cloudformation_stack.instances_rootdc.outputs.OnpremDomainControllerInstancePrivateIP]
     domain_name = var.onprem_domain_fqdn
     file_system_administrators_group = "FSxAdmins"
-    organizational_unit_distinguished_name = var.onprem_fsx_ou
+    organizational_unit_distinguished_name = "OU=FSx,${var.onprem_fsx_ou}"
     password = random_password.secret_fsx[0].result
     username = "FSxServiceAccount"
   }
