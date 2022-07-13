@@ -238,7 +238,7 @@ r53_ports = [
     from_port   = 53
     to_port     = 53
     description = "DNS"
-    protocol    = "UDO"
+    protocol    = "UDP"
     cidr_blocks = "0.0.0.0/0"
   },
 ]
