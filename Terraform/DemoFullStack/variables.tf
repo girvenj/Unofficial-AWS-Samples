@@ -1,6 +1,28 @@
+variable "ad_ports" {
+  description = "Inbound Security Group ports for onpremises domain controllers"
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string
+}
+
+variable "fsx_ports" {
+  description = "Inbound Security Group ports for FSx"
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
 }
 
 variable "mad_deploy_fsx" {
@@ -9,7 +31,7 @@ variable "mad_deploy_fsx" {
 }
 
 variable "mad_deploy_pki" {
-  description = ""
+  description = "Deploy FSx Integrated with AWS Managed Microsoft AD"
   type        = bool
 }
 
@@ -59,24 +81,34 @@ variable "mad_user_admin" {
   ## Terraform - Sensitive Variables = https://learn.hashicorp.com/tutorials/terraform/sensitive-variables
 }*/
 
+variable "ms_ports" {
+  description = "Inbound Security Group ports for member servers"
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
+}
+
 variable "onprem_child_domain_netbios" {
   description = "The fully qualified name for the directory, such as ONPREMISES"
   type        = string
 }
 
 variable "onprem_create_child_domain" {
-  description = ""
+  description = "Deploy child of onpremises AD"
   type        = bool
 }
 
-
 variable "onprem_deploy_fsx" {
-  description = ""
+  description = "Deploy FSx Integrated with onpremises AD"
   type        = bool
 }
 
 variable "onprem_deploy_pki" {
-  description = ""
+  description = "Deploy PKI Integrated with onpremises AD"
   type        = bool
 }
 
@@ -91,7 +123,7 @@ variable "onprem_domain_netbios" {
 }
 
 variable "onprem_fsx_ou" {
-  description = ""
+  description = "FSx Integrated with onpremises AD parent OU"
   type        = string
 }
 
@@ -100,52 +132,34 @@ variable "onprem_user_admin" {
   type        = string
 }
 
+variable "pki_ports" {
+  description = "Inbound Security Group ports for PKI servers"
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
+}
+
+variable "r53_ports" {
+  description = "Inbound Security Group ports for PKI servers"
+  type = set(object({
+    from_port   = number
+    to_port     = number
+    description = string
+    protocol    = string
+    cidr_blocks = string
+  }))
+}
+
 variable "rds_port_number" {
-  description = ""
+  description = "RDS SQL Intance Integrated with AWS Managed Microsoft AD port number"
   type        = number
 }
 
 variable "vpc_cidr" {
   description = "VPC CIDR Block"
   type        = string
-}
-
-variable "ad_ports" {
-  type = set(object({
-    from_port   = number
-    to_port     = number
-    description = string
-    protocol    = string
-    cidr_blocks = string
-  }))
-}
-
-variable "ms_ports" {
-  type = set(object({
-    from_port   = number
-    to_port     = number
-    description = string
-    protocol    = string
-    cidr_blocks = string
-  }))
-}
-
-variable "pki_ports" {
-  type = set(object({
-    from_port   = number
-    to_port     = number
-    description = string
-    protocol    = string
-    cidr_blocks = string
-  }))
-}
-
-variable "fsx_ports" {
-  type = set(object({
-    from_port   = number
-    to_port     = number
-    description = string
-    protocol    = string
-    cidr_blocks = string
-  }))
 }

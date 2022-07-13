@@ -74,7 +74,7 @@ resource "aws_db_instance" "rds" {
   instance_class       = "db.t3.xlarge"
   license_model        = "license-included"
   multi_az             = false
-  password             = random_password.secret_rds.result
+  password             = random_password.secret_rds[0].result
   port                 = var.rds_port_number
   skip_final_snapshot  = true
   storage_type         = "gp2"
@@ -84,7 +84,7 @@ resource "aws_db_instance" "rds" {
   vpc_security_group_ids = [aws_security_group.rds[0].id]
   username = "admin"
   depends_on = [
-    aws_db_subnet_group.rds,
+    aws_db_subnet_group.rds[0],
     aws_directory_service_directory.mad,
     aws_iam_role.rds,
     aws_security_group.rds,

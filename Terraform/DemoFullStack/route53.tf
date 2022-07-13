@@ -1,19 +1,19 @@
 resource "aws_security_group" "r53_outbound_resolver_sg" {
   name        = "Demo-VPC-Outbound-Resolver-SG-${random_string.random_string.result}"
   description = "Demo-VPC-Outbound-Resolver-SG-${random_string.random_string.result}"
-  egress {
-    from_port   = 53
-    to_port     = 53
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+
+  dynamic "egress" {
+    for_each = var.r53_ports
+    iterator = r53_ports
+    content {
+      description = r53_ports.value.description
+      from_port   = r53_ports.value.from_port
+      to_port     = r53_ports.value.to_port
+      protocol    = r53_ports.value.protocol
+      cidr_blocks = [r53_ports.value.cidr_blocks]
+    }
   }
 
-  egress {
-    from_port   = 53
-    to_port     = 53
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
   tags = {
     Name = "Demo-VPC-Outbound-Resolver-SG-${random_string.random_string.result}"
   }

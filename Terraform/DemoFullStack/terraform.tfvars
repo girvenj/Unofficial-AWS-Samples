@@ -1,16 +1,16 @@
 aws_region                  = "us-east-2"
-mad_deploy_fsx              = false
-mad_deploy_pki              = false
-mad_deploy_rds              = false
+mad_deploy_fsx              = true
+mad_deploy_pki              = true
+mad_deploy_rds              = true
 mad_domain_fqdn             = "corp.example.com"
 mad_domain_netbios          = "CORP"
 mad_edition                 = "Enterprise"
 mad_onprem_trust_direction  = "Two-Way"
 mad_user_admin              = "Admin"
 onprem_child_domain_netbios = "CHILD"
-onprem_create_child_domain  = false
-onprem_deploy_fsx           = false
-onprem_deploy_pki           = false
+onprem_create_child_domain  = true
+onprem_deploy_fsx           = true
+onprem_deploy_pki           = true
 onprem_domain_fqdn          = "onpremises.local"
 onprem_domain_netbios       = "ONPREMISES"
 onprem_fsx_ou               = "DC=onpremises,DC=local"
@@ -224,4 +224,21 @@ pki_ports = [
     protocol    = "TCP"
     cidr_blocks = "10.0.0.0/24"
   }
+]
+
+r53_ports = [
+  {
+    from_port   = 53
+    to_port     = 53
+    description = "DNS"
+    protocol    = "TCP"
+    cidr_blocks = "0.0.0.0/0"
+  },
+  {
+    from_port   = 53
+    to_port     = 53
+    description = "DNS"
+    protocol    = "UDO"
+    cidr_blocks = "0.0.0.0/0"
+  },
 ]

@@ -1,5 +1,5 @@
 resource "aws_security_group" "fsx" {
-  count       = var.mad_deploy_fsx ? 1 : 0
+  #count       = var.mad_deploy_fsx ? 1 : 0
   name        = "FSx-Security-Group-${random_string.random_string.result}"
   description = "FSx Security Group"
 
@@ -41,7 +41,7 @@ resource "aws_fsx_windows_file_system" "mad_fsx" {
   deployment_type                 = "SINGLE_AZ_2"
   subnet_ids                      = [aws_subnet.network_subnet1.id]
   preferred_subnet_id             = aws_subnet.network_subnet1.id
-  security_group_ids              = [aws_security_group.fsx[0].id]
+  security_group_ids              = [aws_security_group.fsx.id]
   tags = {
     Name = "MAD-FSx-${random_string.random_string.result}"
   }
@@ -62,7 +62,7 @@ resource "aws_fsx_windows_file_system" "onprem_fsx" {
   deployment_type                 = "SINGLE_AZ_2"
   subnet_ids                      = [aws_subnet.network_subnet1.id]
   preferred_subnet_id             = aws_subnet.network_subnet1.id
-  security_group_ids              = [aws_security_group.fsx[0].id]
+  security_group_ids              = [aws_security_group.fsx.id]
   tags = {
     Name = "Onprem-FSx-${random_string.random_string.result}"
   }
@@ -71,7 +71,7 @@ resource "aws_fsx_windows_file_system" "onprem_fsx" {
     domain_name = var.onprem_domain_fqdn
     file_system_administrators_group = "FSxAdmins"
     organizational_unit_distinguished_name = var.onprem_fsx_ou
-    password = random_password.secret_fsx.result
+    password = random_password.secret_fsx[0].result
     username = "FSxServiceAccount"
   }
   depends_on = [
