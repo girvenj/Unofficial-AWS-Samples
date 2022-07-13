@@ -82,7 +82,7 @@ resource "aws_db_instance" "rds" {
     Name = "DemoRDSMad-${random_string.random_string.result}"
   }
   vpc_security_group_ids = [aws_security_group.rds[0].id]
-  username = "admin"
+  username               = "admin"
   depends_on = [
     aws_db_subnet_group.rds[0],
     aws_directory_service_directory.mad,

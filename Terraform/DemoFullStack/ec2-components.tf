@@ -147,12 +147,12 @@ data "aws_iam_policy_document" "ec2" {
     resources = ["arn:${data.aws_partition.main.partition}:ec2:${var.aws_region}:${data.aws_caller_identity.main.account_id}:instance/*"]
   }
   statement {
-    actions   = ["cloudformation:SignalResource"]
-    effect    = "Allow"
+    actions = ["cloudformation:SignalResource"]
+    effect  = "Allow"
     resources = [
       "arn:${data.aws_partition.main.partition}:cloudformation:${var.aws_region}:${data.aws_caller_identity.main.account_id}:stack/instances-rootdc-${random_string.random_string.result}/*",
       "arn:${data.aws_partition.main.partition}:cloudformation:${var.aws_region}:${data.aws_caller_identity.main.account_id}:stack/instances-non-rootdc-${random_string.random_string.result}/*"
-      ]
+    ]
   }
   depends_on = [
     aws_secretsmanager_secret.secret_mad,
