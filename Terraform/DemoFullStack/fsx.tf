@@ -73,7 +73,7 @@ resource "aws_fsx_windows_file_system" "onprem_fsx" {
     domain_name = var.onprem_domain_fqdn
     file_system_administrators_group = "FSxAdmins"
     organizational_unit_distinguished_name = "OU=FSx,${var.onprem_fsx_ou}"
-    password = random_password.secret_fsx[0].result
+    password = random_password.secret_onprem.result
     username = "FSxServiceAccount"
   }
   depends_on = [
