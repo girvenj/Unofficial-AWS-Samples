@@ -24,10 +24,6 @@ resource "aws_subnet" "network_subnet1" {
     Name = "Demo-VPC-Subnet1-${random_string.random_string.result}"
   }
   vpc_id = aws_vpc.network.id
-  depends_on = [
-    data.aws_availability_zones.available,
-    aws_vpc.network
-  ]
 }
 
 resource "aws_subnet" "network_subnet2" {
@@ -38,10 +34,6 @@ resource "aws_subnet" "network_subnet2" {
     Name = "Demo-VPC-Subnet2-${random_string.random_string.result}"
   }
   vpc_id = aws_vpc.network.id
-  depends_on = [
-    data.aws_availability_zones.available,
-    aws_vpc.network
-  ]
 }
 
 resource "aws_internet_gateway" "network" {
@@ -49,9 +41,6 @@ resource "aws_internet_gateway" "network" {
   tags = {
     Name = "Demo-VPC-IGW-${random_string.random_string.result}"
   }
-  depends_on = [
-    aws_vpc.network
-  ]
 }
 
 resource "aws_default_route_table" "network" {
@@ -63,8 +52,4 @@ resource "aws_default_route_table" "network" {
   tags = {
     Name = "Demo-VPC-Default-RT-${random_string.random_string.result}"
   }
-  depends_on = [
-    aws_internet_gateway.network,
-    aws_vpc.network
-  ]
 }

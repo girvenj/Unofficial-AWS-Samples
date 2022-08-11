@@ -302,10 +302,6 @@ resource "aws_ssm_document" "ssm_baseline" {
       ]
     }
 DOC
-  depends_on = [
-    aws_ssm_document.ssm_auditpol,
-    aws_ssm_document.ssm_pki
-  ]
 }
 
 resource "aws_ssm_document" "ssm_auditpol" {

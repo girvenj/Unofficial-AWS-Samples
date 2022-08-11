@@ -12,12 +12,6 @@ resource "aws_directory_service_directory" "mad" {
     vpc_id     = aws_vpc.network.id
     subnet_ids = [aws_subnet.network_subnet1.id, aws_subnet.network_subnet2.id]
   }
-  depends_on = [
-    aws_subnet.network_subnet1,
-    aws_subnet.network_subnet2,
-    random_password.secret_mad,
-    aws_vpc.network
-  ]
 }
 
 resource "aws_security_group_rule" "mad" {
@@ -27,7 +21,4 @@ resource "aws_security_group_rule" "mad" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
   security_group_id = aws_directory_service_directory.mad.security_group_id
-  depends_on = [
-    aws_directory_service_directory.mad
-  ]
 }

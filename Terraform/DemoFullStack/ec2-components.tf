@@ -4,7 +4,7 @@ resource "aws_security_group" "onprem_ad_sg" {
   vpc_id      = aws_vpc.network.id
 
   dynamic "ingress" {
-    for_each = var.ad_ports
+    for_each = local.ad_ports
     iterator = ad_ports
     content {
       description = ad_ports.value.description
@@ -16,6 +16,7 @@ resource "aws_security_group" "onprem_ad_sg" {
   }
 
   egress {
+    description = "All outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -24,9 +25,6 @@ resource "aws_security_group" "onprem_ad_sg" {
   tags = {
     Name = "Domain-Controller-Security-Group-${random_string.random_string.result}"
   }
-  depends_on = [
-    aws_vpc.network
-  ]
 }
 
 resource "aws_security_group" "pki_sg" {
@@ -35,7 +33,7 @@ resource "aws_security_group" "pki_sg" {
   vpc_id      = aws_vpc.network.id
 
   dynamic "ingress" {
-    for_each = var.pki_ports
+    for_each = local.pki_ports
     iterator = pki_ports
     content {
       description = pki_ports.value.description
@@ -47,6 +45,7 @@ resource "aws_security_group" "pki_sg" {
   }
 
   egress {
+    description = "All outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -55,9 +54,6 @@ resource "aws_security_group" "pki_sg" {
   tags = {
     Name = "PKI-Security-Group-${random_string.random_string.result}"
   }
-  depends_on = [
-    aws_vpc.network
-  ]
 }
 
 resource "aws_security_group" "ms_sg" {
@@ -66,7 +62,7 @@ resource "aws_security_group" "ms_sg" {
   vpc_id      = aws_vpc.network.id
 
   dynamic "ingress" {
-    for_each = var.pki_ports
+    for_each = local.ms_ports
     iterator = ms_ports
     content {
       description = ms_ports.value.description
@@ -77,6 +73,7 @@ resource "aws_security_group" "ms_sg" {
     }
   }
   egress {
+    description = "All outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -85,9 +82,6 @@ resource "aws_security_group" "ms_sg" {
   tags = {
     Name = "Member-Server-Security-Group-${random_string.random_string.result}"
   }
-  depends_on = [
-    aws_vpc.network
-  ]
 }
 
 data "aws_ami" "windows_2022" {
@@ -122,6 +116,11 @@ data "aws_iam_policy_document" "ec2" {
     resources = ["*"]
   }
   statement {
+    actions   = ["ec2:AuthorizeSecurityGroupEgress"]
+    effect    = "Allow"
+    resources = ["arn:${data.aws_partition.main.partition}:ec2:${var.aws_region}:${data.aws_caller_identity.main.account_id}:security-group/*"]
+  }
+  statement {
     actions = ["ssm:StartAutomationExecution"]
     effect  = "Allow"
     resources = [
@@ -135,14 +134,18 @@ data "aws_iam_policy_document" "ec2" {
     effect    = "Allow"
     resources = ["arn:${data.aws_partition.main.partition}:ssm:${var.aws_region}:*:document/AWS-RunRemoteScript", "arn:${data.aws_partition.main.partition}:ssm:${var.aws_region}:*:document/AWS-RunPowerShellScript"]
   }
-
   statement {
     actions = ["ssm:SendCommand"]
     effect  = "Allow"
     condition {
       test     = "ForAnyValue:StringEquals"
       variable = "ssm:ResourceTag/aws:cloudformation:stack-name"
-      values   = ["instances-rootdc-${random_string.random_string.result}", "instances-non-rootdc-${random_string.random_string.result}"]
+      values   = [
+        "instance-root-dc-${random_string.random_string.result}", 
+        "instance-child_dc-${random_string.random_string.result}", 
+        "instance-root-pki-${random_string.random_string.result}", 
+        "instance-mad-mgmt-${random_string.random_string.result}"
+      ]
     }
     resources = ["arn:${data.aws_partition.main.partition}:ec2:${var.aws_region}:${data.aws_caller_identity.main.account_id}:instance/*"]
   }
@@ -150,19 +153,12 @@ data "aws_iam_policy_document" "ec2" {
     actions = ["cloudformation:SignalResource"]
     effect  = "Allow"
     resources = [
-      "arn:${data.aws_partition.main.partition}:cloudformation:${var.aws_region}:${data.aws_caller_identity.main.account_id}:stack/instances-rootdc-${random_string.random_string.result}/*",
-      "arn:${data.aws_partition.main.partition}:cloudformation:${var.aws_region}:${data.aws_caller_identity.main.account_id}:stack/instances-non-rootdc-${random_string.random_string.result}/*"
+      "arn:${data.aws_partition.main.partition}:cloudformation:${var.aws_region}:${data.aws_caller_identity.main.account_id}:stack/instance-root-dc-${random_string.random_string.result}/*",
+      "arn:${data.aws_partition.main.partition}:cloudformation:${var.aws_region}:${data.aws_caller_identity.main.account_id}:stack/instance-child-dc-${random_string.random_string.result}/*",
+      "arn:${data.aws_partition.main.partition}:cloudformation:${var.aws_region}:${data.aws_caller_identity.main.account_id}:stack/instance-root-pki-${random_string.random_string.result}/*",
+      "arn:${data.aws_partition.main.partition}:cloudformation:${var.aws_region}:${data.aws_caller_identity.main.account_id}:stack/instance-mad-mgmt-${random_string.random_string.result}/*"
     ]
   }
-  depends_on = [
-    aws_secretsmanager_secret.secret_mad,
-    aws_secretsmanager_secret.secret_onprem,
-    aws_ssm_document.ssm_baseline,
-    aws_ssm_document.ssm_auditpol,
-    aws_ssm_document.ssm_pki,
-    data.aws_caller_identity.main,
-    data.aws_partition.main
-  ]
 }
 
 resource "aws_iam_role" "ec2" {
@@ -179,11 +175,6 @@ resource "aws_iam_role" "ec2" {
   tags = {
     Name = "EC2-Instance-IAM-Role-${random_string.random_string.result}"
   }
-  depends_on = [
-    data.aws_iam_policy_document.ec2_instance_assume_role_policy,
-    data.aws_iam_policy_document.ec2,
-    data.aws_partition.main
-  ]
 }
 
 resource "aws_iam_instance_profile" "ec2" {

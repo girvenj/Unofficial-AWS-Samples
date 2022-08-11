@@ -110,6 +110,7 @@ Parameters:
       - Two-Way
       - 'One-Way: Incoming'
       - 'One-Way: Outgoing'
+      - None
     Default: Two-Way
     Description: Trust Direction from AWS Managed Microsoft AD to on-premises domain.
     Type: String
@@ -1482,7 +1483,7 @@ Resources:
                   } Else {
                       Start-DscConfiguration 'C:\Temp\AuditConfigInstance' -Wait -Verbose -Force
                   }
-                  
+
                   Invoke-DscStatusCheck
 
                   Try {
@@ -2982,6 +2983,7 @@ Resources:
             description: Fully qualified domain name (FQDN) of the forest root domain e.g. onpremises.local
             type: String
           DomainNetBIOSName:
+            default: placeholder
             description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. ONPREMISES
             type: String
           DomainType:
@@ -2998,7 +3000,7 @@ Resources:
             type: String
           LogicalResourceId:
             description: CloudFormation Resource ID 
-            type: String                      
+            type: String
           MadDirectoryID:
             default: placeholder
             description: Directory ID of MAD domain
@@ -3310,7 +3312,7 @@ Resources:
 
                   If ('{{DeploymentType}}' -eq 'Management') {
                       Write-Output 'Installing SQL Server Management Studio'
-                  (New-Object -TypeName 'System.Net.WebClient').DownloadFile('https://aka.ms/ssmsfullsetup', 'C:\Temp\SSMS-Setup.exe')
+                      (New-Object -TypeName 'System.Net.WebClient').DownloadFile('https://aka.ms/ssmsfullsetup', 'C:\Temp\SSMS-Setup.exe')
                       $ArgumentList = '/Quiet'
                       Try {
                           $Process = Start-Process -FilePath 'C:\Temp\SSMS-Setup.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait -ErrorAction Stop
@@ -3470,10 +3472,10 @@ Resources:
                       $ConfigurationData = @{
                           AllNodes = @(
                               @{
-                                  NodeName             = '*'
+                                  NodeName                    = '*'
                                   #CertificateFile      = 'C:\Temp\publickeys\DscPublicKey.cer'
                                   #Thumbprint           = $DscCertThumbprint
-                                  PSDscAllowDomainUser = $true
+                                  PSDscAllowDomainUser        = $true
                                   PsDscAllowPlainTextPassword = $true
                               },
                               @{
@@ -3588,7 +3590,7 @@ Resources:
                                   Name      = 'GPMC'
                                   DependsOn = '[WindowsFeature]RSAT-ADDS'
                               }
-                              If ($DeploymentType -eq 'RootDomainController' -or $DeploymentType -eq 'ChildDomainController') {
+                              If ($DeploymentType -eq 'RootDomainController' -or $DeploymentType -eq 'ChildDomainController' -or $DeploymentType -eq 'AdditionalDomainController') {
                                   WindowsFeature DNS {
                                       Ensure    = 'Present'
                                       Name      = 'DNS'
@@ -3640,11 +3642,30 @@ Resources:
                                               DependsOn                     = '[User]AdministratorPassword'
                                           }
                                       }
+                                      'AdditionalDomainController' {
+                                          ADDomainController PrimaryDC {
+                                              DomainName                    = $DomainDnsName
+                                              Credential                    = $DaCredentials
+                                              SafemodeAdministratorPassword = $RestoreModeCredentials
+                                              DatabasePath                  = 'D:\NTDS'
+                                              LogPath                       = 'D:\NTDS'
+                                              SysvolPath                    = 'D:\SYSVOL'
+                                              DependsOn                     = '[User]AdministratorPassword'
+                                          }
+                                      }
                                   }
-                                  WaitForADDomain WaitForPrimaryDC {
-                                      DomainName  = $DomainDnsName
-                                      WaitTimeout = 600
-                                      DependsOn   = '[ADDomain]PrimaryDC'
+                                  If ($DeploymentType -eq 'AdditionalDomainController') {
+                                      WaitForADDomain WaitForPrimaryDC {
+                                          DomainName  = $DomainDnsName
+                                          WaitTimeout = 600
+                                          DependsOn   = '[ADDomainController]PrimaryDC'
+                                      }
+                                  } Else {
+                                      WaitForADDomain WaitForPrimaryDC {
+                                          DomainName  = $DomainDnsName
+                                          WaitTimeout = 600
+                                          DependsOn   = '[ADDomain]PrimaryDC'
+                                      }
                                   }
                                   ADGroup AddAdminToDomainAdminsGroup {
                                       Ensure           = 'Present'
@@ -3695,13 +3716,6 @@ Resources:
                                           ForestFQDN                        = $DomainDnsName
                                           DependsOn                         = '[WaitForADDomain]WaitForPrimaryDC'
                                       }
-                                      DnsServerConditionalForwarder MADForwarder {
-                                          Name             = $MadDNSName 
-                                          MasterServers    = @($VPCDNS)
-                                          ReplicationScope = 'Forest'
-                                          Ensure           = 'Present'
-                                          DependsOn        = '[WaitForADDomain]WaitForPrimaryDC'
-                                      }
                                       DnsServerADZone CreateReverseLookupZone {
                                           Ensure           = 'Present'
                                           Name             = $ZoneName
@@ -3729,11 +3743,13 @@ Resources:
                                       IPAddresses      = $VPCDNS
                                       DependsOn        = '[WaitForADDomain]WaitForPrimaryDC'
                                   }
-                                  ADKDSKey KdsKey {
-                                      Ensure                   = 'Present'
-                                      EffectiveTime            = ((Get-Date).addhours(-10))
-                                      AllowUnsafeEffectiveTime = $True
-                                      DependsOn                = '[WaitForADDomain]WaitForPrimaryDC'
+                                  If ($DeploymentType -eq 'RootDomainController' -or $DeploymentType -eq 'ChildDomainController') {
+                                      ADKDSKey KdsKey {
+                                          Ensure                   = 'Present'
+                                          EffectiveTime            = ((Get-Date).addhours(-10))
+                                          AllowUnsafeEffectiveTime = $True
+                                          DependsOn                = '[WaitForADDomain]WaitForPrimaryDC'
+                                      }
                                   }
                                   ADServicePrincipalName WSMAN-FQDN {
                                       ServicePrincipalName = "WSMAN/$InstanceNetBIOSName.$DomainDnsName"
@@ -3817,6 +3833,9 @@ Resources:
                       'ChildDomainController' {
                           $EaSecret = Get-SecretInfo -Domain '{{ParentDomainDNSName}}' -SecretArn '{{AdministratorSecretName}}'
                           Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DeploymentType 'ChildDomainController' -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -EaCredentials $EaSecret.DomainCredentials -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $Secret.Credentials -MacAddress $EniConfig.MacAddress -ParentDomainDNSName '{{ParentDomainDNSName}}' -ParentInstanceIP '{{ParentInstanceIP}}' -RestoreModeCredentials $Secret.Credentials -VPCCIDR '{{VPCCIDR}}'
+                      }
+                      'AdditionalDomainController' {
+                          Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DeploymentType 'AdditionalDomainController' -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InterfaceAlias $EniConfig.InterfaceAlias -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -LaCredentials $Secret.Credentials -MacAddress $EniConfig.MacAddress -ParentInstanceIP '{{ParentInstanceIP}}' -RestoreModeCredentials $Secret.Credentials -VPCCIDR '{{VPCCIDR}}'
                       } 
                       default {
                           Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DeploymentType 'Member' -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
@@ -4054,28 +4073,33 @@ Resources:
                               Add-FSxOuAcl -AclPath $FsxOU -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.ActiveDirectoryRights -AccessControlType $AclRule.AccessControlType -ObjectGUID $AclRule.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.ActiveDirectorySecurityInheritance -InheritedObjectGuid $AclRule.InheritedObjectGuid
                           }
                       }
-
+                      
                       $TrustDirection = '{{TrustDirection}}'
-                      Switch ($TrustDirection) {
-                          'Two-Way' {
-                              $TrustDirOnprem = 'Bidirectional'
+                      If ($TrustDirection -ne 'None') {
+                          $VPCDNS = '169.254.169.253'
+                          Try {
+                              Add-DnsServerConditionalForwarderZone -Name {{MadDNSName}} -ReplicationScope "Forest" -MasterServers $VPCDNS
+                          } Catch [System.Exception] {
+                              Write-Output "Failed to create conditional fowarder MAD domain. $_"
+                              Exit 1
                           }
-                          'One-Way: Outgoing' {
-                              $TrustDirOnprem = 'Inbound'
+
+                          Switch ($TrustDirection) {
+                              'Two-Way' { $TrustDirOnprem = 'Bidirectional' }
+                              'One-Way: Outgoing' { $TrustDirOnprem = 'Inbound' }
+                              'One-Way: Incoming' { $TrustDirOnprem = 'Outbound' }
+                              Default { Throw 'InvalidArgument: Invalid value is passed for parameter TrustDirection' }
                           }
-                          'One-Way: Incoming' {
-                              $TrustDirOnprem = 'Outbound'
-                          }
-                          Default { Throw 'InvalidArgument: Invalid value is passed for parameter TrustDirection' }
+
+                          $TrustPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{TrustSecretName}}').UserPassword
+
+                          Write-Output 'Creating Onprem side of trust.'
+                          Invoke-TrustAction -RemoteFQDN '{{MadDNSName}}' -TrustPassword $TrustPassword $TrustDirOnprem
                       }
-
-                      $TrustPassword = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{TrustSecretName}}').UserPassword
-
-                      Write-Output 'Creating Onprem side of trust.'
-                      Invoke-TrustAction -RemoteFQDN '{{MadDNSName}}' -TrustPassword $TrustPassword $TrustDirOnprem
                   }
 
-                  If ($DeploymentType -eq 'EnterpriseCAManagementInstance' -or $DeploymentType -eq 'ManagementInstance') {
+                  $TrustDirection = '{{TrustDirection}}'
+                  If ($DeploymentType -eq 'EnterpriseCAManagementInstance' -or $DeploymentType -eq 'ManagementInstance' -and $TrustDirection -ne 'None') {
                       $CidrRange = @{ IpProtocol = "-1"; IpRanges = '0.0.0.0/0' }
 
                       $IP = '{{VPCCIDR}}'.Split('/')[0]
@@ -4093,7 +4117,6 @@ Resources:
                           Exit 1
                       }
 
-                      $TrustDirection = '{{TrustDirection}}'
                       Switch ($TrustDirection) {
                           'Two-Way' {
                               $TrustDirMAD = 'Two-Way'
@@ -4269,6 +4292,7 @@ Resources:
       AvailabilityZone: !Select
         - 0
         - Fn::GetAZs: !Ref AWS::Region
+      BackupRetentionPeriod: 0
       DBInstanceClass: db.t3.xlarge
       DBInstanceIdentifier: RDS-MAD
       DBSubnetGroupName: !Ref RdsDBSubnetGroup
@@ -4277,9 +4301,11 @@ Resources:
       Engine: sqlserver-se
       EngineVersion: 15.00.4198.2.v1
       LicenseModel: license-included
+      KmsKeyId: alias/aws/rds
       MasterUsername: admin
       MasterUserPassword: !Sub '{{resolve:secretsmanager:${RdsAdminSecret}:SecretString:password}}'
       MultiAZ: false
+      StorageEncrypted: true
       StorageType: gp2
       VPCSecurityGroups:
         - !Ref RdsSG
@@ -4291,6 +4317,7 @@ Resources:
     Condition: YesIntegrateFsxMad
     Properties:
       FileSystemType: WINDOWS
+      KmsKeyId: alias/aws/fsx
       SecurityGroupIds:
         - !Ref FsxSG
       StorageCapacity: 32
@@ -4489,6 +4516,7 @@ Resources:
     Condition: YesIntegrateFSxwSMMAD
     Properties:
       FileSystemType: WINDOWS
+      KmsKeyId: alias/aws/fsx
       SecurityGroupIds:
         - !Ref FsxSG
       StorageCapacity: 32

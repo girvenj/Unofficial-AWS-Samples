@@ -3,7 +3,7 @@ resource "aws_security_group" "r53_outbound_resolver_sg" {
   description = "Demo-VPC-Outbound-Resolver-SG-${random_string.random_string.result}"
 
   dynamic "egress" {
-    for_each = var.r53_ports
+    for_each = local.r53_ports
     iterator = r53_ports
     content {
       description = r53_ports.value.description
@@ -18,9 +18,6 @@ resource "aws_security_group" "r53_outbound_resolver_sg" {
     Name = "Demo-VPC-Outbound-Resolver-SG-${random_string.random_string.result}"
   }
   vpc_id = aws_vpc.network.id
-  depends_on = [
-    aws_vpc.network
-  ]
 }
 
 resource "aws_route53_resolver_endpoint" "r53_outbound_resolver" {
@@ -36,11 +33,6 @@ resource "aws_route53_resolver_endpoint" "r53_outbound_resolver" {
   tags = {
     Name = "Demo-VPC-Outbound-Resolver-${random_string.random_string.result}"
   }
-  depends_on = [
-    aws_security_group.r53_outbound_resolver_sg,
-    aws_subnet.network_subnet1,
-    aws_subnet.network_subnet2
-  ]
 }
 
 resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule_mad" {
@@ -57,20 +49,12 @@ resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule_mad" {
   target_ip {
     ip = tolist(aws_directory_service_directory.mad.dns_ip_addresses)[1]
   }
-  depends_on = [
-    aws_directory_service_directory.mad,
-    aws_route53_resolver_endpoint.r53_outbound_resolver
-  ]
 }
 
 resource "aws_route53_resolver_rule_association" "r53_outbound_resolver_rule_mad_association" {
   name             = "Demo-VPC-Outbound-Resolver-Rule-Assoc-MAD-${random_string.random_string.result}"
   resolver_rule_id = aws_route53_resolver_rule.r53_outbound_resolver_rule_mad.id
   vpc_id           = aws_vpc.network.id
-  depends_on = [
-    aws_route53_resolver_rule.r53_outbound_resolver_rule_mad,
-    aws_vpc.network
-  ]
 }
 
 resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule_onprem" {
@@ -82,22 +66,14 @@ resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule_onprem" {
     Name = "Demo-VPC-Outbound-Resolver-Rule-Onprem-${random_string.random_string.result}"
   }
   target_ip {
-    ip = aws_cloudformation_stack.instances_rootdc.outputs.OnpremDomainControllerInstancePrivateIP
+    ip = aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstancePrivateIP
   }
-  depends_on = [
-    aws_cloudformation_stack.instances_rootdc,
-    aws_route53_resolver_endpoint.r53_outbound_resolver
-  ]
 }
 
 resource "aws_route53_resolver_rule_association" "r53_outbound_resolver_rule_onprem_association" {
   name             = "Demo-VPC-Outbound-Resolver-Rule-Assoc-Onprem-${random_string.random_string.result}"
   resolver_rule_id = aws_route53_resolver_rule.r53_outbound_resolver_rule_onprem.id
   vpc_id           = aws_vpc.network.id
-  depends_on = [
-    aws_route53_resolver_rule.r53_outbound_resolver_rule_onprem,
-    aws_vpc.network
-  ]
 }
 
 resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule_onprem_child" {
@@ -110,12 +86,8 @@ resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule_onprem_child" {
     Name = "Demo-VPC-Outbound-Resolver-Rule-Onprem-Child-${random_string.random_string.result}"
   }
   target_ip {
-    ip = aws_cloudformation_stack.instances_non_rootdc.outputs.ChildOnpremDomainControllerInstancePrivateIP
+    ip = aws_cloudformation_stack.instance_child_dc[0].outputs.ChildOnpremDomainControllerInstancePrivateIP
   }
-  depends_on = [
-    aws_cloudformation_stack.instances_non_rootdc,
-    aws_route53_resolver_endpoint.r53_outbound_resolver
-  ]
 }
 
 resource "aws_route53_resolver_rule_association" "r53_outbound_resolver_rule_onprem_child_association" {
@@ -123,8 +95,4 @@ resource "aws_route53_resolver_rule_association" "r53_outbound_resolver_rule_onp
   name             = "Demo-VPC-Outbound-Resolver-Rule-Assoc-Onprem_Child-${random_string.random_string.result}"
   resolver_rule_id = aws_route53_resolver_rule.r53_outbound_resolver_rule_onprem_child[0].id
   vpc_id           = aws_vpc.network.id
-  depends_on = [
-    aws_route53_resolver_rule.r53_outbound_resolver_rule_onprem_child,
-    aws_vpc.network
-  ]
 }

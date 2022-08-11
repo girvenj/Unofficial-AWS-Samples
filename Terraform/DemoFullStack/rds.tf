@@ -9,6 +9,10 @@ data "aws_iam_policy_document" "rds_instance_assume_role_policy" {
   }
 }
 
+data "aws_kms_alias" "rds" {
+  name = "alias/${var.rds_kms_key}"
+}
+
 resource "aws_iam_role" "rds" {
   count               = var.mad_deploy_rds ? 1 : 0
   name                = "RDS-Domain-IAM-Role-${random_string.random_string.result}"
@@ -17,9 +21,6 @@ resource "aws_iam_role" "rds" {
   tags = {
     Name = "RDS-Domain-IAM-Role-${random_string.random_string.result}"
   }
-  depends_on = [
-    data.aws_iam_policy_document.rds_instance_assume_role_policy
-  ]
 }
 
 resource "aws_db_subnet_group" "rds" {
@@ -29,10 +30,6 @@ resource "aws_db_subnet_group" "rds" {
   tags = {
     Name = "RDS-Subnet-Group"
   }
-  depends_on = [
-    aws_subnet.network_subnet1,
-    aws_subnet.network_subnet2
-  ]
 }
 
 resource "aws_security_group" "rds" {
@@ -47,6 +44,7 @@ resource "aws_security_group" "rds" {
     cidr_blocks = [aws_vpc.network.cidr_block]
   }
   egress {
+    description = "All outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -56,9 +54,6 @@ resource "aws_security_group" "rds" {
     Name = "RDS-Security-Group-${random_string.random_string.result}"
   }
   vpc_id = aws_vpc.network.id
-  depends_on = [
-    aws_vpc.network
-  ]
 }
 
 resource "aws_db_instance" "rds" {
@@ -72,22 +67,17 @@ resource "aws_db_instance" "rds" {
   engine_version       = "15.00.4198.2.v1"
   identifier           = "demo-rds-mad"
   instance_class       = "db.t3.xlarge"
+  kms_key_id           = data.aws_kms_alias.rds.arn
   license_model        = "license-included"
   multi_az             = false
   password             = random_password.secret_rds[0].result
   port                 = var.rds_port_number
   skip_final_snapshot  = true
+  storage_encrypted    = true
   storage_type         = "gp2"
   tags = {
     Name = "DemoRDSMad-${random_string.random_string.result}"
   }
   vpc_security_group_ids = [aws_security_group.rds[0].id]
   username               = "admin"
-  depends_on = [
-    aws_db_subnet_group.rds[0],
-    aws_directory_service_directory.mad,
-    aws_iam_role.rds,
-    aws_security_group.rds,
-    random_password.secret_rds,
-  ]
 }
