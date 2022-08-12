@@ -42,4 +42,3 @@ variable "onprem_child_domain_netbios" {
   description = "The NetBIOS name for the domain, such as CHILD"
   type        = string
 }
-

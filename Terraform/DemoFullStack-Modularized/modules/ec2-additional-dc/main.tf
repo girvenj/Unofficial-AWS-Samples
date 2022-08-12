@@ -93,7 +93,7 @@ resource "aws_iam_instance_profile" "ec2" {
 }
 
 resource "aws_cloudformation_stack" "instance_additional_dc" {
-  name  = "instance-additional-dc-${var.onprem_additional_dc_random_string}"
+  name = "instance-additional-dc-${var.onprem_additional_dc_random_string}"
   parameters = {
     AMI                       = data.aws_ami.ami.id
     InstanceProfile           = aws_iam_instance_profile.ec2.id
@@ -219,4 +219,10 @@ STACK
   timeouts {
     create = "120m"
   }
+}
+
+resource "aws_ec2_tag" "main" {
+  resource_id = aws_cloudformation_stack.instance_additional_dc.outputs.additionalOnpremDomainControllerInstanceID
+  key         = "Patch Group"
+  value       = "Patches-All-DailyCheck"
 }

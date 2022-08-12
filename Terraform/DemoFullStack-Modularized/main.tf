@@ -253,9 +253,8 @@ module "fsx_mad" {
   fsx_mad_subnet_ids                      = [module.network.subnet1_id]
   fsx_mad_throughput_capacity             = 16
   fsx_mad_vpc_id                          = module.network.vpc_id
-}*/
+}
 
-/*
 module "rds_mad" {
   source                = "./modules/rds-mssql"
   rds_allocated_storage = 20
@@ -272,7 +271,8 @@ module "rds_mad" {
   rds_subnet_ids        = [module.network.subnet1_id, module.network.subnet2_id]
   rds_username          = "admin"
   rds_vpc_id            = module.network.vpc_id
-}*/
+}
+*/
 
 module "ssm_docs" {
   source                 = "./modules/ssm-docs"
@@ -303,31 +303,11 @@ module "pki_security_group" {
   vpc_id      = module.network.vpc_id
 }
 
-/*
-module "mad_mgmt_instance" {
-  source                      = "./modules/ec2-mgmt"
-  mad_mgmt_admin_secret       = module.managed_ad.managed_ad_password_secret_id
-  mad_mgmt_deploy_pki         = false
-  mad_mgmt_directory_id       = module.managed_ad.managed_ad_id
-  mad_mgmt_domain_fqdn        = "corp.example.com"
-  mad_mgmt_domain_netbios     = "CORP"
-  mad_mgmt_random_string      = random_string.random_string.result
-  mad_mgmt_security_group_ids = module.ms_security_group.sg_id
-  mad_mgmt_ssm_docs           = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
-  mad_mgmt_subnet_id          = module.network.subnet1_id
-  mad_mgmt_vpc_cidr           = module.network.vpc_cidr
-  onprem_domain_fqdn          = "onpremises.local"
-  mad_trust_direction      = "One-Way: Outgoing"
-  depends_on = [
-    module.r53_outbound_resolver_rule_onprem_root
-  ]
-}*/
-
 module "onprem_root_instance" {
   source                                  = "./modules/ec2-root-dc"
   mad_domain_fqdn                         = "corp.example.com"
   mad_admin_secret                        = module.managed_ad.managed_ad_password_secret_id
-  onprem_root_dc_deploy_fsx               = true
+  onprem_root_dc_deploy_fsx               = false
   onprem_root_dc_domain_fqdn              = "onpremises.local"
   onprem_root_dc_domain_netbios           = "ONPREMISES"
   onprem_root_dc_fsx_ou                   = "DC=onpremises,DC=local"
@@ -354,6 +334,26 @@ module "r53_outbound_resolver_rule_onprem_root" {
   r53_rule_vpc_id                   = module.network.vpc_id
 }
 
+/*
+module "mad_mgmt_instance" {
+  source                      = "./modules/ec2-mgmt"
+  mad_mgmt_admin_secret       = module.managed_ad.managed_ad_password_secret_id
+  mad_mgmt_deploy_pki         = false
+  mad_mgmt_directory_id       = module.managed_ad.managed_ad_id
+  mad_mgmt_domain_fqdn        = "corp.example.com"
+  mad_mgmt_domain_netbios     = "CORP"
+  mad_mgmt_random_string      = random_string.random_string.result
+  mad_mgmt_security_group_ids = module.ms_security_group.sg_id
+  mad_mgmt_ssm_docs           = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
+  mad_mgmt_subnet_id          = module.network.subnet1_id
+  mad_mgmt_vpc_cidr           = module.network.vpc_cidr
+  onprem_domain_fqdn          = "onpremises.local"
+  mad_trust_direction      = "One-Way: Outgoing"
+  depends_on = [
+    module.r53_outbound_resolver_rule_onprem_root
+  ]
+}
+
 module "fsx_onpremises" {
   source                                    = "./modules/fsx-self-managed"
   fsx_self_alias                            = "FSX-Self"
@@ -377,7 +377,6 @@ module "fsx_onpremises" {
   ]
 }
 
-/*
 module "onprem_pki_instance" {
   source                        = "./modules/ec2-pki"
   onprem_administrator_secret   = module.onprem_root_instance.onprem_ad_password_secret_id
@@ -433,4 +432,5 @@ module "onprem_additional_dc_instance" {
   depends_on = [
     module.r53_outbound_resolver_rule_onprem_root
   ]
-}*/
+}
+*/

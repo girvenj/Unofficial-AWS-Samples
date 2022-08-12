@@ -3,9 +3,9 @@ data "aws_kms_alias" "secret" {
 }
 
 resource "aws_secretsmanager_secret" "main" {
-  name = var.name
+  name        = var.name
   description = var.description
-  kms_key_id = data.aws_kms_alias.secret.arn
+  kms_key_id  = data.aws_kms_alias.secret.arn
   tags = {
     Name = var.name
   }

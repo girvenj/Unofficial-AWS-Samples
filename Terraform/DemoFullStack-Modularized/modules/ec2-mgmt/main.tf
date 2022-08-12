@@ -258,3 +258,9 @@ STACK
     create = "120m"
   }
 }
+
+resource "aws_ec2_tag" "main" {
+  resource_id = aws_cloudformation_stack.instance_mad_mgmt.outputs.MADMgmtInstanceID
+  key         = "Patch Group"
+  value       = "Patches-All-DailyCheck"
+}
