@@ -253,7 +253,6 @@ module "managed_ad" {
   mad_vpc_id                               = module.network.vpc_id
 }
 
-/*
 resource "aws_directory_service_region" "example" {
   directory_id = module.managed_ad.managed_ad_id
   region_name  = var.second_aws_region
@@ -264,7 +263,7 @@ resource "aws_directory_service_region" "example" {
   tags = {
     Name = "${module.managed_ad.managed_ad_domain_name}-MAD-${random_string.random_string.result}"
   }
-}*/
+}
 
 module "r53_outbound_resolver_rule_mad" {
   source                            = "./modules/r53-outbound-resolver-rule"
