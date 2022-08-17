@@ -204,10 +204,33 @@ resource "random_string" "random_string" {
 }
 
 module "network" {
-  source            = "./modules/core-network"
+  source            = "./modules/network-core"
   vpc_cidr          = "10.0.0.0/24"
   vpc_name          = "Demo"
   vpc_random_string = random_string.random_string.result
+}
+
+module "network_secondary" {
+  source            = "./modules/network-core"
+  providers         = { aws = aws.secondary }
+  vpc_cidr          = "10.1.0.0/24"
+  vpc_name          = "Demo"
+  vpc_random_string = random_string.random_string.result
+}
+
+module "network_peer" {
+  providers = {
+    aws.src  = aws.primary
+    aws.peer = aws.secondary
+  }
+  source                          = "./modules/network-peer"
+  peer_vpc_cidr                   = module.network_secondary.vpc_cidr
+  peer_vpc_default_route_table_id = module.network_secondary.default_route_table_id
+  peer_vpc_id                     = module.network_secondary.vpc_id
+  peer_region                     = var.second_aws_region
+  vpc_cidr                        = module.network.vpc_cidr
+  vpc_default_route_table_id      = module.network.default_route_table_id
+  vpc_id                          = module.network.vpc_id
 }
 
 module "r53_outbound_resolver" {
@@ -219,27 +242,40 @@ module "r53_outbound_resolver" {
 }
 
 module "managed_ad" {
-  source             = "./modules/mad"
-  mad_domain_fqdn    = "corp.example.com"
-  mad_domain_netbios = "CORP"
-  mad_edition        = "Enterprise"
-  mad_random_string  = random_string.random_string.result
-  mad_secret_kms_key = "aws/secretsmanager"
-  mad_subnet_ids     = [module.network.subnet1_id, module.network.subnet2_id]
-  mad_vpc_id         = module.network.vpc_id
+  source                                   = "./modules/mad"
+  mad_desired_number_of_domain_controllers = 2
+  mad_domain_fqdn                          = "corp.example.com"
+  mad_domain_netbios                       = "CORP"
+  mad_edition                              = "Enterprise"
+  mad_random_string                        = random_string.random_string.result
+  mad_secret_kms_key                       = "aws/secretsmanager"
+  mad_subnet_ids                           = [module.network.subnet1_id, module.network.subnet2_id]
+  mad_vpc_id                               = module.network.vpc_id
 }
+
+/*
+resource "aws_directory_service_region" "example" {
+  directory_id = module.managed_ad.managed_ad_id
+  region_name  = var.second_aws_region
+  vpc_settings {
+    vpc_id     = module.network_secondary.vpc_id
+    subnet_ids = [module.network_secondary.subnet1_id, module.network_secondary.subnet2_id]
+  }
+  tags = {
+    Name = "${module.managed_ad.managed_ad_domain_name}-MAD-${random_string.random_string.result}"
+  }
+}*/
 
 module "r53_outbound_resolver_rule_mad" {
   source                            = "./modules/r53-outbound-resolver-rule"
-  r53_rule_domain_name              = "corp.example.com"
-  r53_rule_name                     = "corp-example-com-rule"
+  r53_rule_domain_name              = module.managed_ad.managed_ad_domain_name
+  r53_rule_name                     = replace("${module.managed_ad.managed_ad_domain_name}", ".", "-")
   r53_rule_r53_outbound_resolver_id = module.r53_outbound_resolver.resolver_endpoint_id
   r53_rule_random_string            = random_string.random_string.result
   r53_rule_target_ip                = module.managed_ad.managed_ad_ips
   r53_rule_vpc_id                   = module.network.vpc_id
 }
 
-/*
 module "fsx_mad" {
   source                                  = "./modules/fsx-mad"
   fsx_mad_alias                           = "FSX-MAD"
@@ -272,7 +308,6 @@ module "rds_mad" {
   rds_username          = "admin"
   rds_vpc_id            = module.network.vpc_id
 }
-*/
 
 module "ssm_docs" {
   source                 = "./modules/ssm-docs"
@@ -281,8 +316,8 @@ module "ssm_docs" {
 
 module "ad_security_group" {
   source      = "./modules/vpc-security-group-ingress"
-  description = "Onpremises AD Security Group"
-  name        = "Onpremises-AD-Security-Group-${random_string.random_string.result}"
+  description = "AD-Server-Security Group"
+  name        = "AD-Server-Security-Group-${random_string.random_string.result}"
   ports       = local.ad_ports
   vpc_id      = module.network.vpc_id
 }
@@ -307,7 +342,7 @@ module "onprem_root_instance" {
   source                                  = "./modules/ec2-root-dc"
   mad_domain_fqdn                         = "corp.example.com"
   mad_admin_secret                        = module.managed_ad.managed_ad_password_secret_id
-  onprem_root_dc_deploy_fsx               = false
+  onprem_root_dc_deploy_fsx               = true
   onprem_root_dc_domain_fqdn              = "onpremises.local"
   onprem_root_dc_domain_netbios           = "ONPREMISES"
   onprem_root_dc_fsx_ou                   = "DC=onpremises,DC=local"
@@ -326,29 +361,28 @@ module "onprem_root_instance" {
 
 module "r53_outbound_resolver_rule_onprem_root" {
   source                            = "./modules/r53-outbound-resolver-rule"
-  r53_rule_name                     = "onpremises-local-rule"
-  r53_rule_domain_name              = "onpremises.local"
+  r53_rule_name                     = replace("${module.onprem_root_instance.onprem_ad_domain_name}", ".", "-")
+  r53_rule_domain_name              = module.onprem_root_instance.onprem_ad_domain_name
   r53_rule_r53_outbound_resolver_id = module.r53_outbound_resolver.resolver_endpoint_id
   r53_rule_random_string            = random_string.random_string.result
   r53_rule_target_ip                = [module.onprem_root_instance.onprem_ad_ip]
   r53_rule_vpc_id                   = module.network.vpc_id
 }
 
-/*
 module "mad_mgmt_instance" {
   source                      = "./modules/ec2-mgmt"
   mad_mgmt_admin_secret       = module.managed_ad.managed_ad_password_secret_id
   mad_mgmt_deploy_pki         = false
   mad_mgmt_directory_id       = module.managed_ad.managed_ad_id
-  mad_mgmt_domain_fqdn        = "corp.example.com"
-  mad_mgmt_domain_netbios     = "CORP"
+  mad_mgmt_domain_fqdn        = module.managed_ad.managed_ad_domain_name
+  mad_mgmt_domain_netbios     = module.managed_ad.managed_ad_netbios_name
   mad_mgmt_random_string      = random_string.random_string.result
   mad_mgmt_security_group_ids = module.ms_security_group.sg_id
   mad_mgmt_ssm_docs           = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
   mad_mgmt_subnet_id          = module.network.subnet1_id
   mad_mgmt_vpc_cidr           = module.network.vpc_cidr
-  onprem_domain_fqdn          = "onpremises.local"
-  mad_trust_direction      = "One-Way: Outgoing"
+  onprem_domain_fqdn          = module.onprem_root_instance.onprem_ad_domain_name
+  mad_trust_direction         = module.onprem_root_instance.mad_trust_direction
   depends_on = [
     module.r53_outbound_resolver_rule_onprem_root
   ]
@@ -359,10 +393,10 @@ module "fsx_onpremises" {
   fsx_self_alias                            = "FSX-Self"
   fsx_self_automatic_backup_retention_days  = 7
   fsx_self_deployment_type                  = "SINGLE_AZ_2"
-  fsx_self_domain_fqdn                      = "onpremises.local"
+  fsx_self_domain_fqdn                      = module.onprem_root_instance.onprem_ad_domain_name
   fsx_self_dns_ips                          = [module.onprem_root_instance.onprem_ad_ip]
-  fsx_self_parent_ou_dn                     = "DC=onpremises,DC=local"
-  fsx_self_file_system_administrators_group = "FSxAdmins"
+  fsx_self_parent_ou_dn                     = module.onprem_root_instance.onprem_ad_fsx_ou
+  fsx_self_file_system_administrators_group = module.onprem_root_instance.onprem_ad_fsx_admin
   fsx_self_kms_key                          = "aws/fsx"
   fsx_self_password_secret                  = module.onprem_root_instance.onprem_ad_fsx_svc_password_secret_id
   fsx_self_random_string                    = random_string.random_string.result
@@ -370,7 +404,7 @@ module "fsx_onpremises" {
   fsx_self_storage_type                     = "SSD"
   fsx_self_subnet_ids                       = [module.network.subnet1_id]
   fsx_self_throughput_capacity              = 16
-  fsx_self_username                         = "FSxServiceAccount"
+  fsx_self_username                         = module.onprem_root_instance.onprem_ad_fsx_svc
   fsx_self_vpc_id                           = module.network.vpc_id
   depends_on = [
     module.r53_outbound_resolver_rule_onprem_root
@@ -380,8 +414,8 @@ module "fsx_onpremises" {
 module "onprem_pki_instance" {
   source                        = "./modules/ec2-pki"
   onprem_administrator_secret   = module.onprem_root_instance.onprem_ad_password_secret_id
-  onprem_domain_fqdn            = "onpremises.local"
-  onprem_domain_netbios         = "ONPREMISES"
+  onprem_domain_fqdn            = module.onprem_root_instance.onprem_ad_domain_name
+  onprem_domain_netbios         = module.onprem_root_instance.onprem_ad_netbios_name
   onprem_pki_random_string      = random_string.random_string.result
   onprem_pki_security_group_ids = module.pki_security_group.sg_id
   onprem_pki_ssm_docs           = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
@@ -396,7 +430,7 @@ module "onprem_child_dc_instance" {
   source                             = "./modules/ec2-child-dc"
   onprem_administrator_secret        = module.onprem_root_instance.onprem_ad_password_secret_id
   onprem_dc_ip                       = module.onprem_root_instance.onprem_ad_ip
-  onprem_domain_fqdn                 = "onpremises.local"
+  onprem_domain_fqdn                 = module.onprem_root_instance.onprem_ad_domain_name
   onprem_child_dc_random_string      = random_string.random_string.result
   onprem_child_dc_security_group_ids = module.ad_security_group.sg_id
   onprem_child_dc_ssm_docs           = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
@@ -410,11 +444,11 @@ module "onprem_child_dc_instance" {
 
 module "r53_outbound_resolver_rule_onprem_child" {
   source                            = "./modules/r53-outbound-resolver-rule"
-  r53_rule_name                     = "child-onpremises-local-rule"
-  r53_rule_domain_name              = "child.onpremises.local"
+  r53_rule_name                     = replace("${module.onprem_child_dc_instance.onprem_child_ad_domain_name}", ".", "-")
+  r53_rule_domain_name              = module.onprem_child_dc_instance.onprem_child_ad_domain_name
   r53_rule_r53_outbound_resolver_id = module.r53_outbound_resolver.resolver_endpoint_id
   r53_rule_random_string            = random_string.random_string.result
-  r53_rule_target_ip                = [module.onprem_pki_instance.child_onprem_ad_ip]
+  r53_rule_target_ip                = [module.onprem_child_dc_instance.child_onprem_ad_ip]
   r53_rule_vpc_id                   = module.network.vpc_id
 }
 
@@ -422,8 +456,8 @@ module "onprem_additional_dc_instance" {
   source                                  = "./modules/ec2-additional-dc"
   onprem_administrator_secret             = module.onprem_root_instance.onprem_ad_password_secret_id
   onprem_dc_ip                            = module.onprem_root_instance.onprem_ad_ip
-  onprem_domain_fqdn                      = "onpremises.local"
-  onprem_domain_netbios                   = "ONPREMISES"
+  onprem_domain_fqdn                      = module.onprem_root_instance.onprem_ad_domain_name
+  onprem_domain_netbios                   = module.onprem_root_instance.onprem_ad_netbios_name
   onprem_additional_dc_random_string      = random_string.random_string.result
   onprem_additional_dc_security_group_ids = module.ad_security_group.sg_id
   onprem_additional_dc_ssm_docs           = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
@@ -433,4 +467,3 @@ module "onprem_additional_dc_instance" {
     module.r53_outbound_resolver_rule_onprem_root
   ]
 }
-*/

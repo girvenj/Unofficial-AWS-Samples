@@ -1,3 +1,13 @@
+terraform {
+  required_version = ">= 0.12.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
+
 resource "aws_security_group" "sg" {
   name        = var.name
   description = var.description

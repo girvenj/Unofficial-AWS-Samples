@@ -1,3 +1,17 @@
+terraform {
+  required_version = ">= 0.12.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
+}
+
 data "aws_iam_policy_document" "rds_instance_assume_role_policy" {
   statement {
     actions = ["sts:AssumeRole"]

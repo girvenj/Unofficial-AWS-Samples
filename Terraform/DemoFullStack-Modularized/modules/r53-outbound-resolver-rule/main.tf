@@ -1,4 +1,12 @@
-
+terraform {
+  required_version = ">= 0.12.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
 resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule" {
   domain_name          = var.r53_rule_domain_name
   name                 = "${var.r53_rule_name}-${var.r53_rule_random_string}"

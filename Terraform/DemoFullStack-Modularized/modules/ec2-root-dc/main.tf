@@ -1,3 +1,17 @@
+terraform {
+  required_version = ">= 0.12.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
+}
+
 data "aws_ami" "ami" {
   most_recent = true
   owners      = ["amazon"]
@@ -300,8 +314,8 @@ STACK
   }
 }
 
-resource "aws_ec2_tag" "main" {
+/*resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstanceID
   key         = "Patch Group"
   value       = "Patches-All-DailyCheck"
-}
+}*/

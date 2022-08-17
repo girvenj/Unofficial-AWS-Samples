@@ -1,3 +1,13 @@
+terraform {
+  required_version = ">= 0.12.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
+
 resource "aws_ssm_document" "ssm_baseline" {
   name            = "SSM-Baseline-${var.ssm_docs_random_string}"
   document_format = "JSON"

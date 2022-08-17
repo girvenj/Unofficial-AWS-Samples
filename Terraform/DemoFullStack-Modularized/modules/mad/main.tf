@@ -1,3 +1,17 @@
+terraform {
+  required_version = ">= 0.12.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
+}
+
 resource "random_password" "main" {
   length           = 32
   special          = true
@@ -13,11 +27,12 @@ module "store_secret" {
 }
 
 resource "aws_directory_service_directory" "main" {
-  edition    = var.mad_edition
-  enable_sso = false
-  name       = var.mad_domain_fqdn
-  password   = random_password.main.result
-  short_name = var.mad_domain_netbios
+  desired_number_of_domain_controllers = var.mad_desired_number_of_domain_controllers
+  edition                              = var.mad_edition
+  enable_sso                           = false
+  name                                 = var.mad_domain_fqdn
+  password                             = random_password.main.result
+  short_name                           = var.mad_domain_netbios
   tags = {
     Name = "${var.mad_domain_fqdn}-MAD-${var.mad_random_string}"
   }
