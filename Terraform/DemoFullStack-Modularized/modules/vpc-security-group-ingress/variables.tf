@@ -1,10 +1,10 @@
-variable "name" {
-  description = "Security group name"
+variable "description" {
+  description = "Security group description"
   type        = string
 }
 
-variable "description" {
-  description = "Security group description"
+variable "name" {
+  description = "Security group name"
   type        = string
 }
 

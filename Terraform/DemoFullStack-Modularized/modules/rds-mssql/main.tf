@@ -79,7 +79,7 @@ locals {
       to_port     = var.rds_port_number
       description = "SQL"
       protocol    = "TCP"
-      cidr_blocks = data.aws_vpc.main.cidr_block
+      cidr_blocks = [data.aws_vpc.main.cidr_block]
     }
   ]
 }

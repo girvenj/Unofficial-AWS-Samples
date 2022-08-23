@@ -4,19 +4,17 @@ variable "fsx_self_alias" {
 }
 
 variable "fsx_self_automatic_backup_retention_days" {
-  default     = 7
   description = "The number of days to retain automatic backups. Minimum of 0 and maximum of 90"
   type        = number
 }
 
 variable "fsx_self_deployment_type" {
-  default     = "SINGLE_AZ_2"
   description = "Specifies the file system deployment type, valid values are MULTI_AZ_1, SINGLE_AZ_1 and SINGLE_AZ_2"
+  type = string
   validation {
     condition     = contains(["MULTI_AZ_1", "SINGLE_AZ_1", "SINGLE_AZ_2"], var.fsx_self_deployment_type)
     error_message = "The storage type value must be MULTI_AZ_1, SINGLE_AZ_1, or SINGLE_AZ_2"
   }
-  type = string
 }
 
 variable "fsx_self_domain_fqdn" {
@@ -40,9 +38,8 @@ variable "fsx_self_file_system_administrators_group" {
 }
 
 variable "fsx_self_kms_key" {
-  type        = string
-  default     = "aws/fsx"
   description = "ARN for the KMS Key to encrypt the file system at rest"
+  type        = string
 }
 
 variable "fsx_self_password_secret" {
@@ -56,13 +53,11 @@ variable "fsx_self_random_string" {
 }
 
 variable "fsx_self_storage_capacity" {
-  default     = 32
   description = "Storage capacity (GiB) of the file system. Minimum of 32 and maximum of 65536"
   type        = number
 }
 
 variable "fsx_self_storage_type" {
-  default     = "SSD"
   description = "Specifies the storage type, valid values are SSD and HDD"
   type        = string
   validation {
@@ -77,7 +72,6 @@ variable "fsx_self_subnet_ids" {
 }
 
 variable "fsx_self_throughput_capacity" {
-  default     = 16
   description = "Throughput (megabytes per second) of the file system in power of 2 increments. Minimum of 8 and maximum of 2048"
   type        = number
 }

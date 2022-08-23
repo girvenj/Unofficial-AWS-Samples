@@ -1,5 +1,4 @@
 variable "rds_allocated_storage" {
-  default     = 20
   description = "The allocated storage in gibibytes"
   type        = number
 }
@@ -10,33 +9,28 @@ variable "rds_directory_id" {
 }
 
 variable "rds_engine" {
-  default     = "sqlserver-se"
   description = "The database engine to use"
   type        = string
 }
 
 variable "rds_engine_version" {
-  default     = "15.00.4198.2.v1"
   description = "The engine version to use. If auto_minor_version_upgrade is enabled, you can provide a prefix of the version such as 5.7 (for 5.7.10)"
   type        = string
 }
 
 variable "rds_identifier" {
-  default     = "rds-mad"
   description = "The name of the RDS instance"
   type        = string
 }
 
 variable "rds_instance_class" {
-  default     = "db.t3.xlarge"
   description = "The instance type of the RDS instance"
   type        = string
 }
 
 variable "rds_kms_key" {
-  type        = string
-  default     = "aws/rds"
   description = "Alias for the KMS encryption key"
+  type        = string
 }
 
 variable "rds_port_number" {
@@ -50,13 +44,11 @@ variable "rds_random_string" {
 }
 
 variable "rds_secret_kms_key" {
-  default     = "aws/secretsmanager"
   description = "Alias for the KMS encryption key used to encrypt the local db admin"
   type        = string
 }
 
 variable "rds_storage_type" {
-  default     = "gp2"
   description = "One of standard (magnetic), gp2 (general purpose SSD), or io1 (provisioned IOPS SSD)"
   type        = string
   validation {

@@ -107,6 +107,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
   parameters = {
     AMI              = data.aws_ami.ami.id
     DeployMadPki     = tostring(var.mad_mgmt_deploy_pki)
+    EbsKmsKey        = var.mad_mgmt_ebs_kms_key
     InstanceProfile  = aws_iam_instance_profile.ec2.id
     MadAdminSecret   = var.mad_mgmt_admin_secret
     MadDirectoryId   = var.mad_mgmt_directory_id
@@ -132,16 +133,19 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
           - 'true'
           - 'false'
         Description: Deploy Enterpise Ca with AWS Managed Microsoft AD
-        Type: String  
+        Type: String
+      EbsKmsKey:
+        Description: Alias for the KMS encryption key used to encrypt the EBS volumes
+        Type: String
       InstanceProfile:
         Description: Instance profile and role to allow instances to use SSM Automation
-        Type: String  
+        Type: String
       MadAdminSecret:
         Description: Secret containing the random password of the AWS Managed Microsoft AD Admin account
-        Type: String  
+        Type: String
       MadDirectoryId:
         Description: Directory ID of the AWS Managed Microsoft AD
-        Type: String  
+        Type: String
       MadDomainName:
         AllowedPattern: ^([a-zA-Z0-9]+(-[a-zA-Z0-9]+)*\.)+[a-zA-Z]{2,}$
         Description: Fully qualified domain name (FQDN) of the AWS Managed Microsoft AD domain e.g. corp.example.com
@@ -194,14 +198,14 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                   VolumeSize: 60
                   VolumeType: gp3
                   Encrypted: true
-                  KmsKeyId: alias/aws/ebs
+                  KmsKeyId: !Sub alias/$${EbsKmsKey}
                   DeleteOnTermination: true
               - DeviceName: /dev/xvdf
                 Ebs:
                   VolumeSize: 10
                   VolumeType: gp3
                   Encrypted: true
-                  KmsKeyId: alias/aws/ebs
+                  KmsKeyId: !Sub alias/$${EbsKmsKey}
                   DeleteOnTermination: true
           IamInstanceProfile: !Ref InstanceProfile
           ImageId: !Ref AMI

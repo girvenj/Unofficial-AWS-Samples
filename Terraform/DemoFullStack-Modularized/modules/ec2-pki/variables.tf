@@ -13,6 +13,11 @@ variable "onprem_domain_netbios" {
   type        = string
 }
 
+variable "onprem_pki_ebs_kms_key" {
+  description = "Alias for the KMS encryption key used to encrypt the EBS volumes"
+  type        = string
+}
+
 variable "onprem_pki_random_string" {
   description = "Random string to ensure resource names are unique"
   type        = string

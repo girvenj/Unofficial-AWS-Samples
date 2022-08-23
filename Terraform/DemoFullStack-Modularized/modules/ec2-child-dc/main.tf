@@ -106,6 +106,7 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
   name = "instance-child-dc-${var.onprem_child_dc_random_string}"
   parameters = {
     AMI                       = data.aws_ami.ami.id
+    EbsKmsKey                 = var.onprem_child_dc_ebs_kms_key
     InstanceProfile           = aws_iam_instance_profile.ec2.id
     OnPremAdministratorSecret = var.onprem_administrator_secret
     OnpremChildNetBiosName    = var.onprem_child_domain_netbios
@@ -123,6 +124,9 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
       AMI:
         #Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
+        Type: String
+      EbsKmsKey:
+        Description: Alias for the KMS encryption key used to encrypt the EBS volumes
         Type: String
       InstanceProfile:
         Description: Instance profile and role to allow instances to use SSM Automation
@@ -170,14 +174,14 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
               Ebs:
                 DeleteOnTermination: true
                 Encrypted: true
-                KmsKeyId: alias/aws/ebs
+                KmsKeyId: !Sub alias/$${EbsKmsKey}
                 VolumeSize: 60
                 VolumeType: gp3
             - DeviceName: /dev/xvdf
               Ebs:
                 DeleteOnTermination: true
                 Encrypted: true
-                KmsKeyId: alias/aws/ebs
+                KmsKeyId: !Sub alias/$${EbsKmsKey}
                 VolumeSize: 10
                 VolumeType: gp3
           IamInstanceProfile: !Ref InstanceProfile

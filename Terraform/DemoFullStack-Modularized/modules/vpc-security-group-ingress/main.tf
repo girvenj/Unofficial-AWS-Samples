@@ -1,9 +1,8 @@
 terraform {
-  required_version = ">= 0.12.0"
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 4.0"
+      source                = "hashicorp/aws"
+      version               = "~> 4.0"
     }
   }
 }
@@ -21,7 +20,7 @@ resource "aws_security_group" "sg" {
       from_port   = ports.value.from_port
       to_port     = ports.value.to_port
       protocol    = ports.value.protocol
-      cidr_blocks = [ports.value.cidr_blocks]
+      cidr_blocks = ports.value.cidr_blocks
     }
   }
 

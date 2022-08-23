@@ -1,10 +1,10 @@
-variable "mad_mgmt_random_string" {
-  description = "Random string to ensure resource names are unique"
+variable "mad_mgmt_admin_secret" {
+  description = "Secret containing MAD Admin credentials"
   type        = string
 }
 
-variable "mad_mgmt_admin_secret" {
-  description = "Secret containing MAD Admin credentials"
+variable "mad_mgmt_ebs_kms_key" {
+  description = "Alias for the KMS encryption key used to encrypt the EBS volumes"
   type        = string
 }
 
@@ -25,6 +25,11 @@ variable "mad_mgmt_domain_fqdn" {
 
 variable "mad_mgmt_domain_netbios" {
   description = "The NetBIOS name for the domain, such as CORP"
+  type        = string
+}
+
+variable "mad_mgmt_random_string" {
+  description = "Random string to ensure resource names are unique"
   type        = string
 }
 

@@ -138,6 +138,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
   name = "instance-root-dc-${var.onprem_root_dc_random_string}"
   parameters = {
     AMI                       = data.aws_ami.ami.id
+    EbsKmsKey                 = var.onprem_root_dc_ebs_kms_key
     FsxOnpremAdmins           = var.onprem_root_dc_fsx_administrators_group
     FsxOnpremParentOu         = var.onprem_root_dc_fsx_ou
     FsxOnpremSvcSecret        = module.store_secret_fsx_svc.secret_id
@@ -162,11 +163,8 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
         #Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
         Type: String
-      IntegrateFsxOnprem:
-        AllowedValues:
-          - 'true'
-          - 'false'
-        Description: Deploy & Integrate Amazon FSX for Windows with On-Premises AD
+      EbsKmsKey:
+        Description: Alias for the KMS encryption key used to encrypt the EBS volumes
         Type: String
       FsxOnpremAdmins:
         Description: The name of the domain group whose members are granted administrative privileges for the file system
@@ -182,10 +180,16 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
         Type: String
       InstanceProfile:
         Description: Instance profile and role to allow instances to use SSM Automation
-        Type: String  
+        Type: String
+      IntegrateFsxOnprem:
+        AllowedValues:
+          - 'true'
+          - 'false'
+        Description: Deploy & Integrate Amazon FSX for Windows with On-Premises AD
+        Type: String
       MadAdminSecret:
         Description: Secret containing the random password of the AWS Managed Microsoft AD Admin account
-        Type: String  
+        Type: String
       MadDomainName:
         AllowedPattern: ^([a-zA-Z0-9]+(-[a-zA-Z0-9]+)*\.)+[a-zA-Z]{2,}$
         Description: Fully qualified domain name (FQDN) of the AWS Managed Microsoft AD domain e.g. corp.example.com
@@ -194,7 +198,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
         Type: String
       OnPremAdministratorSecret:
         Description: Secret containing the random password of the onpremises Microsoft AD Administrator account
-        Type: String  
+        Type: String
       OnpremDomainName:
         AllowedPattern: ^([a-zA-Z0-9]+(-[a-zA-Z0-9]+)*\.)+[a-zA-Z]{2,}$
         Description: Fully qualified domain name (FQDN) of the On-Premises domain e.g. onpremises.local
@@ -240,14 +244,14 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
               Ebs:
                 DeleteOnTermination: true
                 Encrypted: true
-                KmsKeyId: alias/aws/ebs
+                KmsKeyId: !Sub alias/$${EbsKmsKey}
                 VolumeSize: 60
                 VolumeType: gp3
             - DeviceName: /dev/xvdf
               Ebs:
                 DeleteOnTermination: true
                 Encrypted: true
-                KmsKeyId: alias/aws/ebs
+                KmsKeyId: !Sub alias/$${EbsKmsKey}
                 VolumeSize: 10
                 VolumeType: gp3
           IamInstanceProfile: !Ref InstanceProfile

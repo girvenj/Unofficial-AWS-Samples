@@ -13,15 +13,15 @@ terraform {
 }
 
 provider "aws" {
-  region = var.aws_region
+  region = var.aws_region_primary
 }
 
 provider "aws" {
   alias  = "primary"
-  region = var.aws_region
+  region = var.aws_region_primary
 }
 
 provider "aws" {
   alias  = "secondary"
-  region = var.second_aws_region
+  region = var.aws_region_secondary
 }

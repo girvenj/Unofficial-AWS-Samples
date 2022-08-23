@@ -28,7 +28,6 @@ variable "mad_random_string" {
 }
 
 variable "mad_secret_kms_key" {
-  default     = "aws/secretsmanager"
   description = "Alias for the KMS encryption key used to encrypt the admin crednetials"
   type        = string
 }

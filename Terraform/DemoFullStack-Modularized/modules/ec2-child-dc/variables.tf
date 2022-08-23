@@ -3,13 +3,8 @@ variable "onprem_administrator_secret" {
   type        = string
 }
 
-variable "onprem_dc_ip" {
-  description = "IP of exisiting domain controller for DNS resolution of parent domain"
-  type        = string
-}
-
-variable "onprem_domain_fqdn" {
-  description = "The fully qualified name for the parent domain, such as onpremises.local"
+variable "onprem_child_dc_ebs_kms_key" {
+  description = "Alias for the KMS encryption key used to encrypt the EBS volumes"
   type        = string
 }
 
@@ -40,5 +35,15 @@ variable "onprem_child_dc_vpc_cidr" {
 
 variable "onprem_child_domain_netbios" {
   description = "The NetBIOS name for the domain, such as CHILD"
+  type        = string
+}
+
+variable "onprem_dc_ip" {
+  description = "IP of exisiting domain controller for DNS resolution of parent domain"
+  type        = string
+}
+
+variable "onprem_domain_fqdn" {
+  description = "The fully qualified name for the parent domain, such as onpremises.local"
   type        = string
 }

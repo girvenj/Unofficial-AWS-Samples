@@ -23,14 +23,14 @@ locals {
       to_port     = 445
       description = "SMB"
       protocol    = "TCP"
-      cidr_blocks = data.aws_vpc.main.cidr_block
+      cidr_blocks = [data.aws_vpc.main.cidr_block]
     },
     {
       from_port   = 5985
       to_port     = 5986
       description = "WinRM"
       protocol    = "TCP"
-      cidr_blocks = data.aws_vpc.main.cidr_block
+      cidr_blocks = [data.aws_vpc.main.cidr_block]
     }
   ]
 }

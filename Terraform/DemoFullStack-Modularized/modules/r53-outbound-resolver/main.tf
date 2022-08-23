@@ -15,14 +15,14 @@ locals {
       to_port     = 53
       description = "DNS"
       protocol    = "TCP"
-      cidr_blocks = "0.0.0.0/0"
+      cidr_blocks = ["0.0.0.0/0"]
     },
     {
       from_port   = 53
       to_port     = 53
       description = "DNS"
       protocol    = "UDP"
-      cidr_blocks = "0.0.0.0/0"
+      cidr_blocks = ["0.0.0.0/0"]
     },
   ]
 }

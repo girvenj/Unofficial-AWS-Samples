@@ -23,6 +23,11 @@ variable "onprem_root_dc_domain_netbios" {
   type        = string
 }
 
+variable "onprem_root_dc_ebs_kms_key" {
+  description = "Alias for the KMS encryption key used to encrypt the EBS volumes"
+  type        = string
+}
+
 variable "onprem_root_dc_fsx_ou" {
   description = "FSx integrated with onpremises AD parent OU"
   type        = string
@@ -44,7 +49,6 @@ variable "onprem_root_dc_random_string" {
 }
 
 variable "onprem_root_dc_secret_kms_key" {
-  default     = "aws/secretsmanager"
   description = "Alias for the KMS encryption key used to encrypt the Administrator credentials"
   type        = string
 }
