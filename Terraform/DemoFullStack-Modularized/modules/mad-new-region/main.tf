@@ -22,15 +22,6 @@ resource "aws_directory_service_region" "main" {
   }
 }
 
-/*
-data "aws_directory_service_directory" "main" {
-  provider = aws.secondary
-  directory_id = var.mad_new_region_directory_id
-  depends_on = [
-    aws_directory_service_region.main
-  ]
-}*/
-
 data "aws_security_groups" "main" {
   provider = aws.secondary
   filter {

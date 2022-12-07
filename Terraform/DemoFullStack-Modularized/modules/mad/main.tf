@@ -19,11 +19,12 @@ resource "random_password" "main" {
 }
 
 module "store_secret" {
-  source         = "../secret"
-  name           = "${var.mad_domain_fqdn}-MAD-Admin-Secret-${var.mad_random_string}"
-  username       = "Admin"
-  password       = random_password.main.result
-  secret_kms_key = var.mad_secret_kms_key
+  source                  = "../secret"
+  name                    = "${var.mad_domain_fqdn}-MAD-Admin-Secret-${var.mad_random_string}"
+  username                = "Admin"
+  password                = random_password.main.result
+  recovery_window_in_days = 0
+  secret_kms_key          = var.mad_secret_kms_key
 }
 
 resource "aws_directory_service_directory" "main" {

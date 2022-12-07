@@ -15,6 +15,13 @@ variable "password" {
   type        = string
 }
 
+variable "recovery_window_in_days" {
+  default     = 0
+  description = "Number of days that AWS Secrets Manager waits before it can delete the secret."
+  sensitive   = true
+  type        = number
+}
+
 variable "secret_kms_key" {
   default     = "aws/secretsmanager"
   description = "ARN or Id of the AWS KMS key to be used to encrypt the secret values in the versions stored in this secret"

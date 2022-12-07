@@ -461,7 +461,7 @@ module "fsx_onpremises" {
   fsx_self_storage_type                     = var.fsx_self_storage_type
   fsx_self_subnet_ids                       = [module.network.subnet1_id]
   fsx_self_throughput_capacity              = 16
-  fsx_self_username                         = module.onprem_root_instance.onprem_ad_fsx_svc
+  fsx_self_username                         = var.onprem_root_dc_fsx_svc_username
   fsx_self_vpc_id                           = module.network.vpc_id
   depends_on = [
     module.r53_outbound_resolver_rule_onprem_root

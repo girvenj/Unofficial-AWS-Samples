@@ -119,19 +119,21 @@ resource "random_password" "fsx_svc" {
 }
 
 module "store_secret_admin" {
-  source         = "../secret"
-  name           = "${var.onprem_root_dc_domain_fqdn}-Onprem-Administrator-Secret-${var.onprem_root_dc_random_string}"
-  username       = "Administrator"
-  password       = random_password.admin.result
-  secret_kms_key = var.onprem_root_dc_secret_kms_key
+  source                  = "../secret"
+  name                    = "${var.onprem_root_dc_domain_fqdn}-Onprem-Administrator-Secret-${var.onprem_root_dc_random_string}"
+  username                = "Administrator"
+  password                = random_password.admin.result
+  recovery_window_in_days = 0
+  secret_kms_key          = var.onprem_root_dc_secret_kms_key
 }
 
 module "store_secret_fsx_svc" {
-  source         = "../secret"
-  name           = "${var.onprem_root_dc_domain_fqdn}-Onprem-FSx-Svc-Secret-${var.onprem_root_dc_random_string}"
-  username       = var.onprem_root_dc_fsx_svc_username
-  password       = random_password.fsx_svc.result
-  secret_kms_key = var.onprem_root_dc_secret_kms_key
+  source                  = "../secret"
+  name                    = "${var.onprem_root_dc_domain_fqdn}-Onprem-FSx-Svc-Secret-${var.onprem_root_dc_random_string}"
+  username                = var.onprem_root_dc_fsx_svc_username
+  password                = random_password.fsx_svc.result
+  recovery_window_in_days = 0
+  secret_kms_key          = var.onprem_root_dc_secret_kms_key
 }
 
 resource "aws_cloudformation_stack" "instance_root_dc" {

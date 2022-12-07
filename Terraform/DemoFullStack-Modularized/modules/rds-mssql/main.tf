@@ -48,11 +48,12 @@ resource "random_password" "main" {
 }
 
 module "store_secret" {
-  source         = "../secret"
-  name           = "RDS-Admin-Secret-${var.rds_random_string}"
-  username       = var.rds_username
-  password       = random_password.main.result
-  secret_kms_key = var.rds_secret_kms_key
+  source                  = "../secret"
+  name                    = "RDS-Admin-Secret-${var.rds_random_string}"
+  username                = var.rds_username
+  password                = random_password.main.result
+  recovery_window_in_days = 0
+  secret_kms_key          = var.rds_secret_kms_key
 }
 
 resource "aws_iam_role" "rds" {
@@ -91,7 +92,6 @@ module "rds_security_group" {
   vpc_id      = var.rds_vpc_id
   ports       = local.rds_ports
 }
-
 
 resource "aws_db_instance" "rds" {
   allocated_storage    = var.rds_allocated_storage

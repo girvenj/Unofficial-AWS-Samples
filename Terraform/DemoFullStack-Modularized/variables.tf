@@ -131,6 +131,10 @@ variable "mad_secret_kms_key" {
 variable "mad_trust_direction" {
   description = "Direction of trust between MAD and onpremises AD"
   type        = string
+  validation {
+    condition     = contains(["None", "Two-Way", "One-Way: Incoming", "One-Way: Outgoing"], var.mad_trust_direction)
+    error_message = "The edition value must be None, Two-Way, One-Way: Incoming, or One-Way: Outgoing."
+  }
 }
 
 variable "onprem_additional_dc_ebs_kms_key" {
