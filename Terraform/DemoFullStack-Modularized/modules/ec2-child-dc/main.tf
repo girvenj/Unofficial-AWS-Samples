@@ -240,5 +240,5 @@ STACK
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_child_dc.outputs.ChildOnpremDomainControllerInstanceID
   key         = "Patch Group"
-  value       = "Patches-All-DailyCheck"
+  value       = "Patches-All-DailyCheck-${var.onprem_child_dc_random_string}"
 }

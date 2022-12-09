@@ -320,8 +320,8 @@ STACK
   }
 }
 
-/*resource "aws_ec2_tag" "main" {
+resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstanceID
   key         = "Patch Group"
-  value       = "Patches-All-DailyCheck"
-}*/
+  value       = "Patches-All-DailyCheck-${var.onprem_root_dc_random_string}"
+}

@@ -276,5 +276,5 @@ STACK
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_mad_mgmt.outputs.MADMgmtInstanceID
   key         = "Patch Group"
-  value       = "Patches-All-DailyCheck"
+  value       = "Patches-All-DailyCheck-${var.mad_mgmt_random_string}"
 }

@@ -527,3 +527,11 @@ module "onprem_additional_dc_instance" {
     module.r53_outbound_resolver_rule_onprem_root
   ]
 }
+
+module "ssm-drivers" {
+  source                        = "./modules/ssm-associations"
+  ssm_association_random_string = random_string.random_string.result
+  depends_on = [
+    module.onprem_additional_dc_instance
+  ]
+}

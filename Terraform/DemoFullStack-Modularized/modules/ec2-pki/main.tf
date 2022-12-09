@@ -233,5 +233,5 @@ STACK
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_pki.outputs.OnpremPkiInstanceID
   key         = "Patch Group"
-  value       = "Patches-All-DailyCheck"
+  value       = "Patches-All-DailyCheck-${var.onprem_pki_random_string}"
 }

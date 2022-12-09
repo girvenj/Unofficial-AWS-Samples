@@ -1,3 +1,4 @@
+
 output "vpc_id" {
   value = module.network.vpc_id
 }
@@ -30,7 +31,6 @@ output "managed_ad_sg_id" {
   value = module.managed_ad.managed_ad_sg_id
 }
 
-/*
 output "rds_admin_password_secret_id" {
   value = module.rds_mad.rds_admin_password_secret_id
 }
@@ -90,4 +90,3 @@ output "onprem_ad_password_secret_id" {
 output "onprem_ad_fsx_svc_password_secret_id" {
   value = module.onprem_root_instance.onprem_ad_fsx_svc_password_secret_id
 }
-*/
