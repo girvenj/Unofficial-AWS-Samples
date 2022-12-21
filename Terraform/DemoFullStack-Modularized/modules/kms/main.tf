@@ -15,6 +15,7 @@ resource "aws_kms_key" "main" {
   deletion_window_in_days  = var.kms_key_deletion_window_in_days
   is_enabled               = true
   enable_key_rotation      = true
+  multi_region             = true
   tags = {
     Name = "${var.kms_key_alias_name}-${var.kms_random_string}"
   }

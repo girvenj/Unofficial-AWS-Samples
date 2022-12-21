@@ -601,20 +601,6 @@ module "onprem_additional_dc_instance" {
   ]
 }
 
-module "ssm-updates_software" {
-  source                             = "./modules/ssm-associations"
-  ssm_association_approve_after_days = var.ssm_association_approve_after_days
-  ssm_association_deployment_rate    = var.ssm_association_deployment_rate
-  ssm_association_inventory_rate     = var.ssm_association_inventory_rate
-  ssm_association_max_concurrency    = var.ssm_association_max_concurrency
-  ssm_association_max_errors         = var.ssm_association_max_errors
-  ssm_association_patch_group_tag    = "${var.patch_group_tag}-${random_string.random_string.result}"
-  ssm_association_random_string      = random_string.random_string.result
-  depends_on = [
-    module.r53_outbound_resolver_rule_onprem_child
-  ]
-}
-
 resource "aws_ssm_association" "fsx_mad_alias" {
   name             = module.ssm_docs.ssm_fsx_alias_doc_name
   association_name = "FSx-MAD-${random_string.random_string.result}"
@@ -643,4 +629,27 @@ resource "aws_ssm_association" "fsx_onpremises_alias" {
     key    = "InstanceIds"
     values = [module.onprem_root_dc_instance.onprem_ad_instance_id]
   }
+}
+
+module "ssm_updates_software" {
+  source                             = "./modules/ssm-associations"
+  ssm_association_approve_after_days = var.ssm_association_approve_after_days
+  ssm_association_deployment_rate    = var.ssm_association_deployment_rate
+  ssm_association_inventory_rate     = var.ssm_association_inventory_rate
+  ssm_association_max_concurrency    = var.ssm_association_max_concurrency
+  ssm_association_max_errors         = var.ssm_association_max_errors
+  ssm_association_patch_group_tag    = "${var.patch_group_tag}-${random_string.random_string.result}"
+  ssm_association_random_string      = random_string.random_string.result
+  depends_on = [
+    aws_ssm_association.fsx_onpremises_alias
+  ]
+}
+
+resource "aws_ec2_tag" "main" {
+  resource_id = module.onprem_root_dc_instance.onprem_ad_instance_id
+  key         = "Patch Group"
+  value       = "${var.patch_group_tag}-${random_string.random_string.result}"
+  depends_on = [
+    module.ssm_updates_software
+  ]
 }
