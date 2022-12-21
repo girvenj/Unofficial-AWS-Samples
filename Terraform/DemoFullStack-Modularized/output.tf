@@ -52,11 +52,11 @@ output "managed_ad_mgmt_ip" {
 }
 
 output "onprem_ad_instance_id" {
-  value = module.onprem_root_instance.onprem_ad_instance_id
+  value = module.onprem_root_dc_instance.onprem_ad_instance_id
 }
 
 output "onprem_ad_ip" {
-  value = module.onprem_root_instance.onprem_ad_ip
+  value = module.onprem_root_dc_instance.onprem_ad_ip
 }
 
 output "additional_onprem_ad_instance_id" {
@@ -84,9 +84,9 @@ output "onprem_child_ad_ip" {
 }
 
 output "onprem_ad_password_secret_id" {
-  value = module.onprem_root_instance.onprem_ad_password_secret_id
+  value = module.onprem_root_dc_instance.onprem_ad_password_secret_id
 }
 
 output "onprem_ad_fsx_svc_password_secret_id" {
-  value = module.onprem_root_instance.onprem_ad_fsx_svc_password_secret_id
+  value = module.onprem_root_dc_instance.onprem_ad_fsx_svc_password_secret_id
 }
