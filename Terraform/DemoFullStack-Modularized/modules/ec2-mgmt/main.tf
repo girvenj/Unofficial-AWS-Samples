@@ -10,18 +10,27 @@ terraform {
 
 data "aws_ami" "ami" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = [var.mad_mgmt_ec2_ami_owner]
   filter {
     name   = "name"
-    values = ["Windows_Server-2022-English-Full-Base*"]
+    values = [var.mad_mgmt_ec2_ami_name]
+  }
+  filter {
+    name   = "platform"
+    values = ["windows"]
   }
 }
+
 
 data "aws_partition" "main" {}
 
 data "aws_region" "main" {}
 
 data "aws_caller_identity" "main" {}
+
+data "aws_kms_key" "kms" {
+  key_id = var.mad_mgmt_admin_secret_kms_key
+}
 
 data "aws_iam_policy_document" "ec2_instance_assume_role_policy" {
   statement {
@@ -102,6 +111,34 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
+resource "aws_iam_role_policy" "kms" {
+  name  = "kms-policy"
+  count = var.mad_mgmt_use_customer_managed_key ? 1 : 0
+  role  = aws_iam_role.ec2.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "kms:Decrypt",
+        ]
+        Effect = "Allow"
+        Resource = [
+          data.aws_kms_key.kms.arn
+        ]
+      },
+    ]
+  })
+}
+
+resource "aws_kms_grant" "kms_admin_secret" {
+  count             = var.mad_mgmt_use_customer_managed_key ? 1 : 0
+  name              = "kms-admin-secret-grant"
+  key_id            = data.aws_kms_key.kms.id
+  grantee_principal = aws_iam_role.ec2.arn
+  operations        = ["Decrypt"]
+}
+
 resource "aws_cloudformation_stack" "instance_mad_mgmt" {
   name = "instance-mad-mgmt-${var.mad_mgmt_random_string}"
   parameters = {
@@ -114,7 +151,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
     MadDomainName    = var.mad_mgmt_domain_fqdn
     MadNetBiosName   = var.mad_mgmt_domain_netbios
     OnpremDomainName = var.onprem_domain_fqdn
-    SecurityGroupIds = var.mad_mgmt_security_group_ids
+    SecurityGroupId  = var.mad_mgmt_security_group_id
     SsmAutoDocument  = var.mad_mgmt_ssm_docs[0]
     SubnetId         = var.mad_mgmt_subnet_id
     TrustDirection   = var.mad_trust_direction
@@ -164,7 +201,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
         MaxLength: '255'
         MinLength: '2'
         Type: String
-      SecurityGroupIds:
+      SecurityGroupId:
         Description: Security Group Id
         Type: AWS::EC2::SecurityGroup::Id
       SubnetId:
@@ -198,21 +235,21 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                   VolumeSize: 60
                   VolumeType: gp3
                   Encrypted: true
-                  KmsKeyId: !Sub alias/$${EbsKmsKey}
+                  KmsKeyId: !Sub $${EbsKmsKey}
                   DeleteOnTermination: true
               - DeviceName: /dev/xvdf
                 Ebs:
                   VolumeSize: 10
                   VolumeType: gp3
                   Encrypted: true
-                  KmsKeyId: !Sub alias/$${EbsKmsKey}
+                  KmsKeyId: !Sub $${EbsKmsKey}
                   DeleteOnTermination: true
           IamInstanceProfile: !Ref InstanceProfile
           ImageId: !Ref AMI
           InstanceType: m6i.large
           KeyName: Baseline
           SecurityGroupIds:
-            - !Ref SecurityGroupIds
+            - !Ref SecurityGroupId
           SubnetId: !Ref SubnetId
           Tags:
             - Key: Name
@@ -276,5 +313,5 @@ STACK
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_mad_mgmt.outputs.MADMgmtInstanceID
   key         = "Patch Group"
-  value       = "Patches-All-DailyCheck-${var.mad_mgmt_random_string}"
+  value       = var.mad_mgmt_patch_group_tag
 }

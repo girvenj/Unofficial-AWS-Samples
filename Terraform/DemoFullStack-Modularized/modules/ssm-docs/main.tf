@@ -511,3 +511,218 @@ resource "aws_ssm_document" "ssm_pki" {
     }
 DOC
 }
+
+resource "aws_ssm_document" "ssm_fsx_alias" {
+  name            = "SSM-FSX-Alias-${var.ssm_docs_random_string}"
+  document_format = "YAML"
+  document_type   = "Command"
+  content         = <<DOC
+    schemaVersion: '2.2'
+    description: Create FSx Alias DNS Record
+    parameters:
+      Alias:
+        description: (Required) 
+        type: String
+      ARecord:
+        description: (Required) 
+        type: String
+      DomainNetBIOSName:
+        default: ' '
+        description: (Required) 
+        type: String
+      RunLocation:
+        description: (Required) 
+        type: String
+      SecretArn:
+        default: ' '
+        description: (Required) 
+        type: String
+    mainSteps:
+      - action: aws:runPowerShellScript
+        name: createAlias
+        inputs:
+          runCommand:
+            - |
+              Function Set-CredSSP {
+                  [CmdletBinding()]
+                  param(
+                      [Parameter(Mandatory = $true)][ValidateSet('Enable', 'Disable')][string]$Action
+                  )
+
+                  $RootKey = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows'
+                  $CredDelKey = 'CredentialsDelegation'
+                  $FreshCredKey = 'AllowFreshCredentials'
+                  $FreshCredKeyNTLM = 'AllowFreshCredentialsWhenNTLMOnly'
+
+                  Switch ($Action) {
+                      'Enable' {
+                          Write-Output 'Enabling CredSSP'
+                          $CredDelKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
+                          If (-not $CredDelKeyPresent) {
+                              Write-Output "Setting CredSSP registry entry $CredDelKey"
+                              Try {
+                                  $CredDelPath = New-Item -Path "Registry::$RootKey" -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                              } Catch [System.Exception] {
+                                  Write-Output "Failed to create CredSSP registry entry $CredDelKey $_"
+                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
+                                  Exit 1
+                              }
+                          } Else {
+                              $CredDelPath = Join-Path -Path $RootKey -ChildPath $CredDelKey
+                          }
+
+                          $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
+                          If (-not $FreshCredKeyPresent) {
+                              Write-Output "Setting CredSSP registry entry $FreshCredKey"
+                              Try {
+                                  $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                              } Catch [System.Exception] {
+                                  Write-Output "Failed to create CredSSP registry entry $FreshCredKey $_"
+                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
+                                  Exit 1
+                              }
+                          } Else {
+                              $FreshCredKeyPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKey
+                          }
+
+                          $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
+                          If (-not $FreshCredKeyNTLMPresent) {
+                              Write-Output "Setting CredSSP registry entry $FreshCredKeyNTLM"
+                              Try {
+                                  $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
+                              } Catch [System.Exception] {
+                                  Write-Output "Failed to create CredSSP registry entry $FreshCredKeyNTLM $_"
+                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
+                                  Exit 1
+                              }
+                          } Else {
+                              $FreshCredKeyNTLMPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKeyNTLM
+                          }
+
+                          Try {
+                              $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentials' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                              $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFresh' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                              $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentialsWhenNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                              $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFreshNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
+                              $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
+                              $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
+                          } Catch [System.Exception] {
+                              Write-Output "Failed to create CredSSP registry properties $_"
+                              Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
+                              Exit 1
+                          }
+
+                          Try {
+                              $Null = Enable-WSManCredSSP -Role 'Client' -DelegateComputer '*' -Force -ErrorAction Stop
+                              $Null = Enable-WSManCredSSP -Role 'Server' -Force -ErrorAction Stop
+                          } Catch [System.Exception] {
+                              Write-Output "Failed to enable CredSSP $_"
+                              $Null = Disable-WSManCredSSP -Role 'Client' -ErrorAction SilentlyContinue
+                              $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
+                              Exit 1
+                          }
+                      }
+                      'Disable' {
+                          Write-Output 'Disabling CredSSP'
+                          Try {
+                              Disable-WSManCredSSP -Role 'Client' -ErrorAction Continue
+                              Disable-WSManCredSSP -Role 'Server' -ErrorAction Stop
+                          } Catch [System.Exception] {
+                              Write-Output "Failed to disable CredSSP $_"
+                              Exit 1
+                          }
+
+                          Write-Output 'Removing CredSSP registry entries'
+                          Try {
+                              Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
+                          } Catch [System.Exception] {
+                              Write-Output "Failed to remove CredSSP registry entries $_"
+                              Exit 1
+                          }
+                      }
+                      Default {
+                          Write-Output 'InvalidArgument: Invalid value is passed for parameter Action'
+                          Exit 1
+                      }
+                  }
+              }
+
+              Function Get-SecretInfo {
+                  [CmdletBinding()]
+                  Param (
+                      [Parameter(Mandatory = $True)][String]$Domain,
+                      [Parameter(Mandatory = $True)][String]$SecretArn
+                  )
+
+                  Write-Output "Getting $SecretArn Secret"
+                  Try {
+                      $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+                  } Catch [System.Exception] {
+                      Write-Output "Failed to get $SecretArn Secret $_"
+                      Exit 1
+                  }
+
+                  Write-Output 'Creating PSCredential object from Secret'
+                  $Username = $SecretContent.username
+                  $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                  $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
+                  $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
+
+                  $Output = [PSCustomObject][Ordered]@{
+                      'Credentials'       = $Credentials
+                      'DomainCredentials' = $DomainCredentials
+                      'Username'          = $Username
+                      'UserPassword'      = $UserPassword
+                  }
+
+                  Return $Output
+              }
+
+              Write-Output 'Getting a domain controller to perform actions against'
+              Try {
+                  $DC = Get-ADDomainController -Discover -ForceDiscover -ErrorAction Stop | Select-Object -ExpandProperty 'HostName'
+              } Catch [System.Exception] {
+                  Write-Output "Failed to get a domain controller $_"
+                  Exit 1
+              }
+
+              If ('{{RunLocation}}' -eq 'MemberServer') {}
+
+              If ('{{RunLocation}}' -eq 'MemberServer') { $DomainCreds = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecretArn}}').DomainCredentials }
+
+              Write-Output 'Getting AD domain'
+              Try { 
+                  If ('{{RunLocation}}' -eq 'MemberServer') { $Domain = Get-ADDomain -Credential $DomainCreds -ErrorAction Stop } Else { $Domain = Get-ADDomain }
+              } Catch [System.Exception] {
+                  Write-Output "Failed to get AD domain $_" Exit 1
+              }
+
+              $FQDN = $Domain | Select-Object -ExpandProperty 'DNSRoot'
+
+              $Alias = '{{Alias}}'
+              $Cname = "{{Alias}}.$FQDN"
+              $ARecord = '{{ARecord}}'
+
+              If ('{{RunLocation}}' -eq 'MemberServer') { Set-CredSSP -Action 'Enable' }
+
+              $Counter = 0
+              Do {
+                  $CnameRecordPresent = Resolve-DnsName -Name $Cname -DnsOnly -Server $DC -ErrorAction SilentlyContinue
+                  If (-not $CnameRecordPresent) {
+                      $Counter ++
+                      Write-Output 'CNAME record missing, creating it'
+                      If ('{{RunLocation}}' -eq 'MemberServer') { Invoke-Command -Authentication 'CredSSP' -ComputerName $env:COMPUTERNAME -Credential $DomainCreds -ScriptBlock { Add-DnsServerResourceRecordCName -Name $using:Alias -ComputerName $using:DC -HostNameAlias $using:ARecord -ZoneName $using:FQDN } } Else { Add-DnsServerResourceRecordCName -Name $Alias -ComputerName $DC -HostNameAlias $ARecord -ZoneName $FQDN }
+                      If ($Counter -gt '1') {
+                          Start-Sleep -Seconds 10
+                      }
+                  }
+              } Until ($CnameRecordPresent -or $Counter -eq 12)
+
+              If ($Counter -ge 12) {
+                  Write-Output 'CNAME record never created'
+                  Exit 1
+              }
+
+              If ('{{RunLocation}}' -eq 'MemberServer') { Set-CredSSP -Action 'Disable' }
+DOC
+}

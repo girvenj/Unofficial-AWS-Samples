@@ -10,10 +10,14 @@ terraform {
 
 data "aws_ami" "ami" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = [var.onprem_child_dc_ec2_ami_owner]
   filter {
     name   = "name"
-    values = ["Windows_Server-2022-English-Full-Base*"]
+    values = [var.onprem_child_dc_ec2_ami_name]
+  }
+  filter {
+    name   = "platform"
+    values = ["windows"]
   }
 }
 
@@ -22,6 +26,10 @@ data "aws_partition" "main" {}
 data "aws_region" "main" {}
 
 data "aws_caller_identity" "main" {}
+
+data "aws_kms_key" "kms" {
+  key_id = var.onprem_administrator_secret_kms_key
+}
 
 data "aws_iam_policy_document" "ec2_instance_assume_role_policy" {
   statement {
@@ -102,6 +110,34 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
+resource "aws_iam_role_policy" "kms" {
+  name  = "kms-policy"
+  count = var.onprem_child_dc_use_customer_managed_key ? 1 : 0
+  role  = aws_iam_role.ec2.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "kms:Decrypt",
+        ]
+        Effect = "Allow"
+        Resource = [
+          data.aws_kms_key.kms.arn
+        ]
+      },
+    ]
+  })
+}
+
+resource "aws_kms_grant" "kms_admin_secret" {
+  count             = var.onprem_child_dc_use_customer_managed_key ? 1 : 0
+  name              = "kms-admin-secret-grant"
+  key_id            = data.aws_kms_key.kms.id
+  grantee_principal = aws_iam_role.ec2.arn
+  operations        = ["Decrypt"]
+}
+
 resource "aws_cloudformation_stack" "instance_child_dc" {
   name = "instance-child-dc-${var.onprem_child_dc_random_string}"
   parameters = {
@@ -112,7 +148,7 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
     OnpremChildNetBiosName    = var.onprem_child_domain_netbios
     OnpremDomainName          = var.onprem_domain_fqdn
     ParentInstanceIP          = var.onprem_dc_ip
-    SecurityGroupIds          = var.onprem_child_dc_security_group_ids
+    SecurityGroupId          = var.onprem_child_dc_security_group_id
     SsmAutoDocument           = var.onprem_child_dc_ssm_docs[0]
     SubnetId                  = var.onprem_child_dc_subnet_id
     VPCCIDR                   = var.onprem_child_dc_vpc_cidr
@@ -149,7 +185,7 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
       ParentInstanceIP:
         Description: IP Address of the forest root domain controller
         Type: String
-      SecurityGroupIds:
+      SecurityGroupId:
         Description: Security Group Id
         Type: AWS::EC2::SecurityGroup::Id
       SubnetId:
@@ -174,14 +210,14 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
               Ebs:
                 DeleteOnTermination: true
                 Encrypted: true
-                KmsKeyId: !Sub alias/$${EbsKmsKey}
+                KmsKeyId: !Sub $${EbsKmsKey}
                 VolumeSize: 60
                 VolumeType: gp3
             - DeviceName: /dev/xvdf
               Ebs:
                 DeleteOnTermination: true
                 Encrypted: true
-                KmsKeyId: !Sub alias/$${EbsKmsKey}
+                KmsKeyId: !Sub $${EbsKmsKey}
                 VolumeSize: 10
                 VolumeType: gp3
           IamInstanceProfile: !Ref InstanceProfile
@@ -189,7 +225,7 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
           InstanceType: m6i.large
           KeyName: Baseline
           SecurityGroupIds:
-            - Ref: SecurityGroupIds
+            - Ref: SecurityGroupId
           SubnetId: !Ref SubnetId
           Tags:
             - Key: Domain
@@ -240,5 +276,5 @@ STACK
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_child_dc.outputs.ChildOnpremDomainControllerInstanceID
   key         = "Patch Group"
-  value       = "Patches-All-DailyCheck-${var.onprem_child_dc_random_string}"
+  value       = var.onprem_child_dc_patch_group_tag
 }

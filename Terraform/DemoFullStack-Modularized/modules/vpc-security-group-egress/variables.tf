@@ -1,19 +1,19 @@
 variable "description" {
-  description = "Security group description"
+  description = "Security group description."
   type        = string
 }
 
 variable "name" {
-  description = "Security group name"
+  description = "Security group name."
   type        = string
 }
 
 variable "ports" {
-  description = "List of maps containing security group rule information"
+  description = "List of maps containing security group rule information."
   type        = list(any)
 }
 
 variable "vpc_id" {
-  description = "VPC ID where security group created in"
+  description = "VPC ID where security group created in."
   type        = string
 }

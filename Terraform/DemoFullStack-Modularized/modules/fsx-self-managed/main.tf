@@ -13,7 +13,11 @@ data "aws_vpc" "main" {
 }
 
 data "aws_kms_alias" "main" {
-  name = "alias/${var.fsx_self_kms_key}"
+  name = var.fsx_self_kms_key
+}
+
+data "aws_secretsmanager_secret_version" "main" {
+  secret_id = var.fsx_self_password_secret
 }
 
 locals {
@@ -33,10 +37,6 @@ locals {
       cidr_blocks = [data.aws_vpc.main.cidr_block]
     }
   ]
-}
-
-data "aws_secretsmanager_secret_version" "main" {
-  secret_id = var.fsx_self_password_secret
 }
 
 module "fsx_security_group" {

@@ -83,7 +83,7 @@ resource "aws_ssm_patch_baseline" "linux" {
   name             = "${each.key}-Patches-All-DailyCheck-${var.ssm_association_random_string}"
   operating_system = each.value.operating_system
   approval_rule {
-    approve_after_days  = 0
+    approve_after_days  = var.ssm_association_approve_after_days
     compliance_level    = "CRITICAL"
     enable_non_security = true
     patch_filter {
@@ -110,7 +110,7 @@ resource "aws_ssm_default_patch_baseline" "linux" {
 resource "aws_ssm_patch_group" "linux" {
   baseline_id = aws_ssm_patch_baseline.linux[each.key].id
   for_each    = { for bl in local.aws_ssm_patchbaselinelinux : bl.friendly_name => bl }
-  patch_group = "Patches-All-DailyCheck-${var.ssm_association_random_string}"
+  patch_group = var.ssm_association_patch_group_tag
 }
 
 resource "aws_ssm_patch_baseline" "debian" {
@@ -119,7 +119,7 @@ resource "aws_ssm_patch_baseline" "debian" {
   name             = "${each.key}-Patches-All-DailyCheck-${var.ssm_association_random_string}"
   operating_system = each.value.operating_system
   approval_rule {
-    approve_after_days  = 0
+    approve_after_days  = var.ssm_association_approve_after_days
     compliance_level    = "CRITICAL"
     enable_non_security = true
     patch_filter {
@@ -146,7 +146,7 @@ resource "aws_ssm_default_patch_baseline" "debian" {
 resource "aws_ssm_patch_group" "debian" {
   baseline_id = aws_ssm_patch_baseline.debian[each.key].id
   for_each    = { for bl in local.aws_ssm_patchbaselinedebian : bl.friendly_name => bl }
-  patch_group = "Patches-All-DailyCheck-${var.ssm_association_random_string}"
+  patch_group = var.ssm_association_patch_group_tag
 }
 
 resource "aws_ssm_patch_baseline" "other" {
@@ -155,7 +155,7 @@ resource "aws_ssm_patch_baseline" "other" {
   name             = "${each.key}-Patches-All-DailyCheck-${var.ssm_association_random_string}"
   operating_system = each.value.operating_system
   approval_rule {
-    approve_after_days  = 0
+    approve_after_days  = var.ssm_association_approve_after_days
     compliance_level    = "CRITICAL"
     enable_non_security = false
     patch_filter {
@@ -178,7 +178,7 @@ resource "aws_ssm_default_patch_baseline" "other" {
 resource "aws_ssm_patch_group" "other" {
   baseline_id = aws_ssm_patch_baseline.other[each.key].id
   for_each    = { for bl in local.aws_ssm_patchbaselineother : bl.friendly_name => bl }
-  patch_group = "Patches-All-DailyCheck-${var.ssm_association_random_string}"
+  patch_group = var.ssm_association_patch_group_tag
 }
 
 resource "aws_ssm_patch_baseline" "windows" {
@@ -186,7 +186,7 @@ resource "aws_ssm_patch_baseline" "windows" {
   name             = "Microsoft-Patches-All-DailyCheck-${var.ssm_association_random_string}"
   operating_system = "WINDOWS"
   approval_rule {
-    approve_after_days  = 0
+    approve_after_days  = var.ssm_association_approve_after_days
     compliance_level    = "CRITICAL"
     enable_non_security = false
     patch_filter {
@@ -208,7 +208,7 @@ resource "aws_ssm_patch_baseline" "windows" {
   }
 
   approval_rule {
-    approve_after_days  = 0
+    approve_after_days  = var.ssm_association_approve_after_days
     compliance_level    = "CRITICAL"
     enable_non_security = false
     patch_filter {
@@ -241,15 +241,15 @@ resource "aws_ssm_default_patch_baseline" "windows" {
 
 resource "aws_ssm_patch_group" "windows" {
   baseline_id = aws_ssm_patch_baseline.windows.id
-  patch_group = "Patches-All-DailyCheck-${var.ssm_association_random_string}"
+  patch_group = var.ssm_association_patch_group_tag
 }
 
 resource "aws_ssm_association" "main" {
   association_name    = "${each.value}-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity = "HIGH"
   for_each            = toset(local.aws_ssm_association_drivers)
-  max_concurrency     = "50%"
-  max_errors          = "100%"
+  max_concurrency     = var.ssm_association_max_concurrency
+  max_errors          = var.ssm_association_max_errors
   name                = "AWS-ConfigureAWSPackage"
   parameters = {
     action              = "Install"
@@ -261,15 +261,15 @@ resource "aws_ssm_association" "main" {
   schedule_expression = "rate(24 Hours)"
   targets {
     key    = "tag:Patch Group"
-    values = ["Patches-All-DailyCheck-${var.ssm_association_random_string}"]
+    values = [var.ssm_association_patch_group_tag]
   }
 }
 
 resource "aws_ssm_association" "launch-agent" {
   association_name    = "AWSEC2Launch-Agent-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity = "HIGH"
-  max_concurrency     = "50%"
-  max_errors          = "100%"
+  max_concurrency     = var.ssm_association_max_concurrency
+  max_errors          = var.ssm_association_max_errors
   name                = "AWS-ConfigureAWSPackage"
   parameters = {
     action              = "Install"
@@ -281,20 +281,20 @@ resource "aws_ssm_association" "launch-agent" {
   schedule_expression = "rate(24 Hours)"
   targets {
     key    = "tag:Patch Group"
-    values = ["Patches-All-DailyCheck-${var.ssm_association_random_string}"]
+    values = [var.ssm_association_patch_group_tag]
   }
 }
 
 resource "aws_ssm_association" "ssm" {
   association_name    = "UpdateSSMAgent-Agent-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity = "HIGH"
-  max_concurrency     = "50%"
-  max_errors          = "100%"
+  max_concurrency     = var.ssm_association_max_concurrency
+  max_errors          = var.ssm_association_max_errors
   name                = "AWS-UpdateSSMAgent"
   schedule_expression = "rate(24 Hours)"
   targets {
     key    = "tag:Patch Group"
-    values = ["Patches-All-DailyCheck-${var.ssm_association_random_string}"]
+    values = [var.ssm_association_patch_group_tag]
   }
 }
 
@@ -316,7 +316,7 @@ resource "aws_ssm_association" "software-inventory" {
   schedule_expression = "rate(6 Hours)"
   targets {
     key    = "tag:Patch Group"
-    values = ["Patches-All-DailyCheck-${var.ssm_association_random_string}"]
+    values = [var.ssm_association_patch_group_tag]
   }
 }
 
@@ -343,13 +343,13 @@ resource "aws_ssm_maintenance_window_target" "main" {
   window_id     = aws_ssm_maintenance_window.main.id
   targets {
     key    = "tag:Patch Group"
-    values = ["Patches-All-DailyCheck-${var.ssm_association_random_string}"]
+    values = [var.ssm_association_patch_group_tag]
   }
 }
 
 resource "aws_ssm_maintenance_window_task" "main" {
-  max_concurrency = "50%"
-  max_errors      = "100%"
+  max_concurrency = var.ssm_association_max_concurrency
+  max_errors      = var.ssm_association_max_errors
   name            = "Patches-All-DailyCheck-${var.ssm_association_random_string}"
   priority        = 1
   task_arn        = "AWS-RunPatchBaseline"

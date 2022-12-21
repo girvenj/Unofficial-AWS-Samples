@@ -7,7 +7,7 @@ output "onprem_ad_ip" {
 }
 
 output "onprem_ad_password_secret_id" {
-  value = module.store_secret_admin.secret_id
+  value = module.store_secret_administrator.secret_id
 }
 
 output "onprem_ad_fsx_svc_password_secret_id" {

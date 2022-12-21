@@ -12,13 +12,22 @@ terraform {
   }
 }
 
+
 data "aws_ami" "ami" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = [var.onprem_root_dc_ec2_ami_owner]
   filter {
     name   = "name"
-    values = ["Windows_Server-2022-English-Full-Base*"]
+    values = [var.onprem_root_dc_ec2_ami_name]
   }
+  filter {
+    name   = "platform"
+    values = ["windows"]
+  }
+}
+
+data "aws_kms_key" "kms" {
+  key_id = var.onprem_root_dc_secret_kms_key
 }
 
 data "aws_partition" "main" {}
@@ -42,7 +51,7 @@ data "aws_iam_policy_document" "ec2" {
   statement {
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     effect    = "Allow"
-    resources = [module.store_secret_admin.secret_id, module.store_secret_fsx_svc.secret_id, var.mad_admin_secret]
+    resources = [module.store_secret_administrator.secret_id, module.store_secret_fsx_svc.secret_id, var.mad_admin_secret]
   }
   statement {
     actions   = ["ec2:DescribeInstances", "ec2:DescribeSecurityGroups", "ssm:DescribeInstanceInformation", "ssm:GetAutomationExecution", "ssm:ListCommands", "ssm:ListCommandInvocations", "ds:CreateConditionalForwarder", "ds:CreateTrust", "ds:DescribeTrusts", "ds:VerifyTrust"]
@@ -85,6 +94,34 @@ data "aws_iam_policy_document" "ec2" {
   }
 }
 
+resource "aws_iam_role_policy" "kms" {
+  name  = "kms-policy"
+  count = var.onprem_root_dc_use_customer_managed_key ? 1 : 0
+  role  = aws_iam_role.ec2.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "kms:Decrypt",
+        ]
+        Effect = "Allow"
+        Resource = [
+          data.aws_kms_key.kms.arn
+        ]
+      },
+    ]
+  })
+}
+
+resource "aws_kms_grant" "kms_administrator_secret" {
+  count             = var.onprem_root_dc_use_customer_managed_key ? 1 : 0
+  name              = "kms-administrator-secret-grant"
+  key_id            = data.aws_kms_key.kms.id
+  grantee_principal = aws_iam_role.ec2.arn
+  operations        = ["Decrypt"]
+}
+
 resource "aws_iam_role" "ec2" {
   name               = "Onprem-Root-DC-EC2-Instance-IAM-Role-${var.onprem_root_dc_random_string}"
   assume_role_policy = data.aws_iam_policy_document.ec2_instance_assume_role_policy.json
@@ -106,7 +143,7 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
-resource "random_password" "admin" {
+resource "random_password" "administrator" {
   length           = 32
   special          = true
   override_special = "!#$%&*()-_=+[]{}<>:?"
@@ -118,11 +155,11 @@ resource "random_password" "fsx_svc" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-module "store_secret_admin" {
+module "store_secret_administrator" {
   source                  = "../secret"
   name                    = "${var.onprem_root_dc_domain_fqdn}-Onprem-Administrator-Secret-${var.onprem_root_dc_random_string}"
   username                = "Administrator"
-  password                = random_password.admin.result
+  password                = random_password.administrator.result
   recovery_window_in_days = 0
   secret_kms_key          = var.onprem_root_dc_secret_kms_key
 }
@@ -149,10 +186,10 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
     InstanceProfile           = aws_iam_instance_profile.ec2.id
     MadAdminSecret            = var.mad_admin_secret
     MadDomainName             = var.mad_domain_fqdn
-    OnPremAdministratorSecret = module.store_secret_admin.secret_id
+    OnPremAdministratorSecret = module.store_secret_administrator.secret_id
     OnpremDomainName          = var.onprem_root_dc_domain_fqdn
     OnpremNetBiosName         = var.onprem_root_dc_domain_netbios
-    SecurityGroupIds          = var.onprem_root_dc_security_group_ids
+    SecurityGroupId           = var.onprem_root_dc_security_group_id
     SsmAutoDocument           = var.onprem_root_dc_ssm_docs[0]
     SubnetId                  = var.onprem_root_dc_subnet_id
     TrustDirection            = var.mad_trust_direction
@@ -213,7 +250,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
         MaxLength: '15'
         MinLength: '1'
         Type: String
-      SecurityGroupIds:
+      SecurityGroupId:
         Description: Security Group Id
         Type: AWS::EC2::SecurityGroup::Id
       SubnetId:
@@ -246,14 +283,14 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
               Ebs:
                 DeleteOnTermination: true
                 Encrypted: true
-                KmsKeyId: !Sub alias/$${EbsKmsKey}
+                KmsKeyId: !Sub $${EbsKmsKey}
                 VolumeSize: 60
                 VolumeType: gp3
             - DeviceName: /dev/xvdf
               Ebs:
                 DeleteOnTermination: true
                 Encrypted: true
-                KmsKeyId: !Sub alias/$${EbsKmsKey}
+                KmsKeyId: !Sub $${EbsKmsKey}
                 VolumeSize: 10
                 VolumeType: gp3
           IamInstanceProfile: !Ref InstanceProfile
@@ -261,7 +298,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
           InstanceType: m6i.large
           KeyName: Baseline
           SecurityGroupIds:
-            - Ref: SecurityGroupIds
+            - Ref: SecurityGroupId
           SubnetId: !Ref SubnetId
           Tags:
               - Key: Domain
@@ -323,5 +360,5 @@ STACK
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstanceID
   key         = "Patch Group"
-  value       = "Patches-All-DailyCheck-${var.onprem_root_dc_random_string}"
+  value       = var.onprem_root_dc_patch_group_tag
 }

@@ -34,7 +34,7 @@ data "aws_availability_zones" "available" {
 }
 
 data "aws_kms_alias" "main" {
-  name = "alias/${var.rds_kms_key}"
+  name = var.rds_kms_key
 }
 
 data "aws_vpc" "main" {

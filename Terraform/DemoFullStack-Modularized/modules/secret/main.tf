@@ -9,7 +9,7 @@ terraform {
 }
 
 data "aws_kms_alias" "secret" {
-  name = "alias/${var.secret_kms_key}"
+  name = var.secret_kms_key
 }
 
 resource "aws_secretsmanager_secret" "main" {

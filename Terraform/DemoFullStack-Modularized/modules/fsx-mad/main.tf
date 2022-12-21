@@ -17,7 +17,7 @@ data "aws_directory_service_directory" "main" {
 }
 
 data "aws_kms_alias" "main" {
-  name = "alias/${var.fsx_mad_kms_key}"
+  name = var.fsx_mad_kms_key
 }
 
 locals {
