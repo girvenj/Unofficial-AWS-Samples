@@ -167,6 +167,10 @@ Foreach ($Instance in $InstanceId) {
                     }
                     Try {
                         $LicenseConfigurationArn = Get-LICMLicenseSpecificationsForResourceList -ResourceArn "arn:aws:ec2:$($Region):$($OwnerAccount):instance/$($Instance)" -Region $Region | Select-Object -ExpandProperty 'LicenseConfigurationArn' -ErrorAction SilentlyContinue
+                    } Catch [System.Exception] {
+                        $LicenseConfigurationArn = $Null
+                    }
+                    Try {
                         If ($LicenseConfigurationArn) {
                             $LicenseSpecification = New-Object -TypeName 'Amazon.LicenseManager.Model.LicenseSpecification'
                             $LicenseSpecification.LicenseConfigurationArn = $LicenseConfigurationArn
@@ -184,9 +188,15 @@ Foreach ($Instance in $InstanceId) {
             'default' {
                 Try {
                     $LicenseConfigurationArn = Get-LICMLicenseSpecificationsForResourceList -ResourceArn "arn:aws:ec2:$($Region):$($OwnerAccount):instance/$($Instance)" -Region $Region | Select-Object -ExpandProperty 'LicenseConfigurationArn' -ErrorAction SilentlyContinue
-                    $LicenseSpecification = New-Object -TypeName 'Amazon.LicenseManager.Model.LicenseSpecification'
-                    $LicenseSpecification.LicenseConfigurationArn = $LicenseConfigurationArn
-                    $Null = Update-LICMLicenseSpecificationsForResource -ResourceArn "arn:aws:ec2:$($Region):$($OwnerAccount):instance/$($Instance)" -RemoveLicenseSpecification $LicenseSpecification -Force -Region $Region -ErrorAction Stop
+                } Catch [System.Exception] {
+                    $LicenseConfigurationArn = $Null
+                }
+                Try {
+                    If ($LicenseConfigurationArn) {
+                        $LicenseSpecification = New-Object -TypeName 'Amazon.LicenseManager.Model.LicenseSpecification'
+                        $LicenseSpecification.LicenseConfigurationArn = $LicenseConfigurationArn
+                        $Null = Update-LICMLicenseSpecificationsForResource -ResourceArn "arn:aws:ec2:$($Region):$($OwnerAccount):instance/$($Instance)" -RemoveLicenseSpecification $LicenseSpecification -Force -Region $Region -ErrorAction Stop
+                    }
                     $Null = Edit-EC2InstancePlacement -InstanceId $Instance -Tenancy $DesiredTenancy -Force -Region $Region -ErrorAction Stop
                 } Catch [System.Exception] {
                     Return "Failed to set instance $Instance tenancy to the desired value $DesiredTenancy. $_"
