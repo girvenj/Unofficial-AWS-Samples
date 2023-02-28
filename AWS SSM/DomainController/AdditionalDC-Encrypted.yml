@@ -253,5 +253,5 @@ mainSteps:
       Resources:
         - '{{launchAdditionalDC.AdditionalInstanceId}}'
       Tags:
-        - Key: Patch Group
+        - Key: PatchGroup
           Value: Patches-All-DailyCheck

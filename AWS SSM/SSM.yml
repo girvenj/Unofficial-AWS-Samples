@@ -33,7 +33,7 @@ mainSteps:
       Targets:
         - Key: tag-key
           Values: 
-            - Patch Group
+            - PatchGroup
     nextStep: LaunchAgentUpdate
   - name: LaunchAgentUpdate
     action: aws:executeAwsApi
@@ -61,7 +61,7 @@ mainSteps:
       Targets:
         - Key: tag-key
           Values: 
-            - Patch Group
+            - PatchGroup
     nextStep: NvmeDriverUpdate
   - name: NvmeDriverUpdate
     action: aws:executeAwsApi
@@ -89,7 +89,7 @@ mainSteps:
       Targets:
         - Key: tag-key
           Values: 
-            - Patch Group
+            - PatchGroup
     nextStep: PvDriverUpdate
   - name: PvDriverUpdate
     action: aws:executeAwsApi
@@ -117,7 +117,7 @@ mainSteps:
       Targets:
         - Key: tag-key
           Values: 
-            - Patch Group
+            - PatchGroup
     nextStep: SsmAgentUpdate
   - name: SsmAgentUpdate
     action: aws:executeAwsApi
@@ -134,7 +134,7 @@ mainSteps:
       Targets:
         - Key: tag-key
           Values: 
-            - Patch Group
+            - PatchGroup
     nextStep: SoftwareInventory
   - name: SoftwareInventory
     action: aws:executeAwsApi

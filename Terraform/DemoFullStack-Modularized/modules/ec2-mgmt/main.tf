@@ -142,20 +142,23 @@ resource "aws_kms_grant" "kms_admin_secret" {
 resource "aws_cloudformation_stack" "instance_mad_mgmt" {
   name = "instance-mad-mgmt-${var.mad_mgmt_random_string}"
   parameters = {
-    AMI              = data.aws_ami.ami.id
-    DeployMadPki     = tostring(var.mad_mgmt_deploy_pki)
-    EbsKmsKey        = var.mad_mgmt_ebs_kms_key
-    InstanceProfile  = aws_iam_instance_profile.ec2.id
-    MadAdminSecret   = var.mad_mgmt_admin_secret
-    MadDirectoryId   = var.mad_mgmt_directory_id
-    MadDomainName    = var.mad_mgmt_domain_fqdn
-    MadNetBiosName   = var.mad_mgmt_domain_netbios
-    OnpremDomainName = var.onprem_domain_fqdn
-    SecurityGroupId  = var.mad_mgmt_security_group_id
-    SsmAutoDocument  = var.mad_mgmt_ssm_docs[0]
-    SubnetId         = var.mad_mgmt_subnet_id
-    TrustDirection   = var.mad_trust_direction
-    VPCCIDR          = var.mad_mgmt_vpc_cidr
+    AMI               = data.aws_ami.ami.id
+    DeployMadPki      = tostring(var.mad_mgmt_deploy_pki)
+    EbsKmsKey         = var.mad_mgmt_ebs_kms_key
+    InstanceProfile   = aws_iam_instance_profile.ec2.id
+    InstanceType      = var.mad_mgmt_ec2_instance_type
+    LaunchTemplate    = var.mad_mgmt_ec2_launch_template
+    MadAdminSecret    = var.mad_mgmt_admin_secret
+    MadDirectoryId    = var.mad_mgmt_directory_id
+    MadDomainName     = var.mad_mgmt_domain_fqdn
+    MadNetBiosName    = var.mad_mgmt_domain_netbios
+    OnpremDomainName  = var.onprem_domain_fqdn
+    SecurityGroupId   = var.mad_mgmt_security_group_id
+    ServerNetBIOSName = var.mad_mgmt_server_netbios_name
+    SsmAutoDocument   = var.mad_mgmt_ssm_docs[0]
+    SubnetId          = var.mad_mgmt_subnet_id
+    TrustDirection    = var.mad_trust_direction
+    VPCCIDR           = var.mad_mgmt_vpc_cidr
   }
 
   template_body = <<STACK
@@ -176,6 +179,12 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
         Type: String
       InstanceProfile:
         Description: Instance profile and role to allow instances to use SSM Automation
+        Type: String
+      InstanceType:
+        Description: Instance type to use for the instance
+        Type: String
+      LaunchTemplate:
+        Description: Specifies a Launch Template to configure the instance
         Type: String
       MadAdminSecret:
         Description: Secret containing the random password of the AWS Managed Microsoft AD Admin account
@@ -204,6 +213,9 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
       SecurityGroupId:
         Description: Security Group Id
         Type: AWS::EC2::SecurityGroup::Id
+      ServerNetBIOSName:
+        Description: The NetBIOS name for the server, such as MAD-MGMT01
+        Type: String
       SubnetId:
         Description: Subnet Id
         Type: AWS::EC2::Subnet::Id
@@ -246,14 +258,17 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                   DeleteOnTermination: true
           IamInstanceProfile: !Ref InstanceProfile
           ImageId: !Ref AMI
-          InstanceType: m6i.large
+          InstanceType: !Ref InstanceType
           KeyName: Baseline
+          LaunchTemplate: 
+            LaunchTemplateId: !Ref LaunchTemplate
+            Version: 1
           SecurityGroupIds:
             - !Ref SecurityGroupId
           SubnetId: !Ref SubnetId
           Tags:
             - Key: Name
-              Value: MAD-MGMT01
+              Value: !Ref ServerNetBIOSName
             - Key: Domain
               Value: !Ref MadDomainName
             - Key: Role
@@ -272,6 +287,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                     $ServerRole = 'Default'
                   }
                   $Params = @{
+                      AdministratorSecretName = '$${AdministratorSecretName}'
                       DeployPki = $DeployPki
                       DeploymentType = $DeploymentType
                       DomainDNSName = '$${DomainDNSName}'
@@ -280,8 +296,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                       LogicalResourceId = 'MADMgmtInstance'
                       MadDirectoryID = '$${MadDirectoryID}'
                       OnpremDomainDNSName = '$${OnpremDomainDNSName}'
-                      AdministratorSecretName = '$${AdministratorSecretName}'
-                      ServerNetBIOSName = 'MAD-MGMT01'
+                      ServerNetBIOSName = '$${ServerNetBIOSName}'
                       ServerRole = $ServerRole
                       StackName = 'instance-mad-mgmt-${var.mad_mgmt_random_string}'
                       TrustDirection = '$${TrustDirection}'
@@ -295,6 +310,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                 DomainNetBIOSName: !Ref MadNetBiosName
                 MadDirectoryID: !Ref MadDirectoryId
                 OnpremDomainDNSName: !Ref OnpremDomainName
+                ServerNetBIOSName: !Ref ServerNetBIOSName
                 TrustDirection: !Ref TrustDirection
                 VPCCIDR: !Ref VPCCIDR
     Outputs:
@@ -312,6 +328,53 @@ STACK
 
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_mad_mgmt.outputs.MADMgmtInstanceID
-  key         = "Patch Group"
+  key         = "PatchGroup"
   value       = var.mad_mgmt_patch_group_tag
+}
+
+data "aws_instance" "main" {
+  instance_id = aws_cloudformation_stack.instance_mad_mgmt.outputs.MADMgmtInstanceID
+}
+
+resource "aws_ec2_tag" "eni" {
+  resource_id = data.aws_instance.main.network_interface_id
+  key         = "Name"
+  value       = var.mad_mgmt_server_netbios_name
+}
+
+
+data "aws_ebs_volume" "sda1" {
+  most_recent = true
+  filter {
+    name   = "attachment.device"
+    values = ["/dev/sda1"]
+  }
+  filter {
+    name   = "attachment.instance-id"
+    values = [aws_cloudformation_stack.instance_mad_mgmt.outputs.MADMgmtInstanceID]
+  }
+}
+
+data "aws_ebs_volume" "xvdf" {
+  most_recent = true
+  filter {
+    name   = "attachment.device"
+    values = ["/dev/xvdf"]
+  }
+  filter {
+    name   = "attachment.instance-id"
+    values = [aws_cloudformation_stack.instance_mad_mgmt.outputs.MADMgmtInstanceID]
+  }
+}
+
+resource "aws_ec2_tag" "sda1" {
+  resource_id = data.aws_ebs_volume.sda1.id
+  key         = "Name"
+  value       = var.mad_mgmt_server_netbios_name
+}
+
+resource "aws_ec2_tag" "xvdf" {
+  resource_id = data.aws_ebs_volume.xvdf.id
+  key         = "Name"
+  value       = var.mad_mgmt_server_netbios_name
 }

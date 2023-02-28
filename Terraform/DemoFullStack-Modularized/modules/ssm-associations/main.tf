@@ -8,9 +8,11 @@ terraform {
   }
 }
 
-data "aws_caller_identity" "main" {}
+data "aws_partition" "main" {}
 
 data "aws_region" "main" {}
+
+data "aws_caller_identity" "main" {}
 
 locals {
   aws_ssm_association_drivers = [
@@ -260,7 +262,7 @@ resource "aws_ssm_association" "main" {
   }
   schedule_expression = "rate(24 Hours)"
   targets {
-    key    = "tag:Patch Group"
+    key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
   }
 }
@@ -280,7 +282,7 @@ resource "aws_ssm_association" "launch-agent" {
   }
   schedule_expression = "rate(24 Hours)"
   targets {
-    key    = "tag:Patch Group"
+    key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
   }
 }
@@ -293,7 +295,7 @@ resource "aws_ssm_association" "ssm" {
   name                = "AWS-UpdateSSMAgent"
   schedule_expression = "rate(24 Hours)"
   targets {
-    key    = "tag:Patch Group"
+    key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
   }
 }
@@ -315,7 +317,7 @@ resource "aws_ssm_association" "software-inventory" {
   }
   schedule_expression = "rate(6 Hours)"
   targets {
-    key    = "tag:Patch Group"
+    key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
   }
 }
@@ -342,7 +344,7 @@ resource "aws_ssm_maintenance_window_target" "main" {
   resource_type = "INSTANCE"
   window_id     = aws_ssm_maintenance_window.main.id
   targets {
-    key    = "tag:Patch Group"
+    key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
   }
 }
@@ -376,4 +378,31 @@ resource "aws_ssm_maintenance_window_task" "main" {
       }
     }
   }
+}
+
+data "aws_iam_policy_document" "amazon_ssm_managed_ec2_instance_default_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["ssm.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "amazon_ssm_managed_ec2_instance_default_role" {
+  name               = "Amazon-SSM-Managed-EC2-Instance-Default-Role-${var.ssm_association_random_string}"
+  assume_role_policy = data.aws_iam_policy_document.amazon_ssm_managed_ec2_instance_default_role.json
+  managed_policy_arns = [
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/AmazonSSMManagedEC2InstanceDefaultPolicy"
+  ]
+  tags = {
+    Name = "Amazon-SSM-Managed-EC2-Instance-Default-Role-${var.ssm_association_random_string}"
+  }
+}
+
+resource "aws_ssm_service_setting" "test_setting" {
+  setting_id    = "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:servicesetting/ssm/managed-instance/default-ec2-instance-management-role"
+  setting_value = "service-role/${aws_iam_role.amazon_ssm_managed_ec2_instance_default_role.name}"
 }

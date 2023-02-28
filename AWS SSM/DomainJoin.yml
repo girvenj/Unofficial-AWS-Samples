@@ -13,27 +13,28 @@ mainSteps:
     name: example
     inputs:
       runCommand:
-        - $DirectoryInfo = Get-DSDirectory -DirectoryId '{{directoryId}}'
-        - $DNSIPs = $DirectoryInfo | Select-Object -ExpandProperty 'DnsIpAddrs'
-        - $FQDN = $DirectoryInfo | Select-Object -ExpandProperty 'Name'
-        - $SecretContent = Get-SECSecretValue -SecretId '{{secretArn}}' -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
-        - $Username = $SecretContent.Username
-        - $UserPW = ConvertTo-SecureString ($SecretContent.Password) -AsPlainText -Force
-        - $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$FQDN\$Username", $UserPW)
-        - Add-Type -AssemblyName 'System.Web'
-        - $MinLength = 64 
-        - $MaxLength = 128 
-        - $Length = Get-Random -Minimum $MinLength -Maximum $MaxLength
-        - $NonAlphaChars = 10
-        - $MachinePassword = [System.Web.Security.Membership]::GeneratePassword($Length, $NonAlphaChars) | ConvertTo-SecureString -AsPlainText -Force
-        - $Name = $Env:COMPUTERNAME
-        - $InterfaceAlias = Get-NetAdapter | Select-Object -ExpandProperty 'Name'
-        - Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ServerAddresses $DNSIPs -ErrorAction Stop
-        - Set-DnsClient -InterfaceAlias $InterfaceAlias -ConnectionSpecificSuffix $FQDN -ErrorAction Stop
-        - Install-WindowsFeature -Name 'RSAT-AD-Tools'
-        - Import-Module -Name 'ActiveDirectory'
-        - New-ADComputer -Name $Name -AccountPassword $MachinePassword -Credential $Credentials -Server $FQDN
-        - Start-Sleep -Seconds 30 
-        - $JoinCred = New-Object -TypeName 'System.Management.Automation.PSCredential' -ArgumentList ([PSCustomObject]@{ UserName = $Null; Password = ($MachinePassword)[0] })
-        - Add-Computer -Domain $FQDN -Options UnsecuredJoin, PasswordPass -Credential $JoinCred
-        - Restart-Computer -Force
+        - |
+          $DirectoryInfo = Get-DSDirectory -DirectoryId '{{directoryId}}'
+          $DNSIPs = $DirectoryInfo | Select-Object -ExpandProperty 'DnsIpAddrs'
+          $FQDN = $DirectoryInfo | Select-Object -ExpandProperty 'Name'
+          $SecretContent = Get-SECSecretValue -SecretId '{{secretArn}}' -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
+          $Username = $SecretContent.Username
+          $UserPW = ConvertTo-SecureString ($SecretContent.Password) -AsPlainText -Force
+          $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$FQDN\$Username", $UserPW)
+          Add-Type -AssemblyName 'System.Web'
+          $MinLength = 64 
+          $MaxLength = 128 
+          $Length = Get-Random -Minimum $MinLength -Maximum $MaxLength
+          $NonAlphaChars = 10
+          $MachinePassword = [System.Web.Security.Membership]::GeneratePassword($Length, $NonAlphaChars) | ConvertTo-SecureString -AsPlainText -Force
+          $Name = $Env:COMPUTERNAME
+          $InterfaceAlias = Get-NetAdapter | Select-Object -ExpandProperty 'Name'
+          Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ServerAddresses $DNSIPs -ErrorAction Stop
+          Set-DnsClient -InterfaceAlias $InterfaceAlias -ConnectionSpecificSuffix $FQDN -ErrorAction Stop
+          Install-WindowsFeature -Name 'RSAT-AD-Tools'
+          Import-Module -Name 'ActiveDirectory'
+          New-ADComputer -Name $Name -AccountPassword $MachinePassword -Credential $Credentials -Server $FQDN
+          Start-Sleep -Seconds 30 
+          $JoinCred = New-Object -TypeName 'System.Management.Automation.PSCredential' -ArgumentList ([PSCustomObject]@{ UserName = $Null; Password = ($MachinePassword)[0] })
+          Add-Computer -Domain $FQDN -Options UnsecuredJoin, PasswordPass -Credential $JoinCred
+          Restart-Computer -Force

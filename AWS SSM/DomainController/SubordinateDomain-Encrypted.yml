@@ -278,5 +278,5 @@ mainSteps:
       Resources:
         - '{{launchSubDC.subInstanceId}}'
       Tags:
-        - Key: Patch Group
+        - Key: PatchGroup
           Value: Patches-All-DailyCheck

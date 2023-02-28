@@ -17,6 +17,17 @@ variable "mad_trust_direction" {
   }
 }
 
+variable "onprem_root_dc_adc_svc_username" {
+  default = "Connector_Svc"
+  description = "The user name for the service account on your self-managed AD domain for AD Connector."
+  type        = string
+}
+
+variable "onprem_root_dc_deploy_adc" {
+  description = "Deploy AD Connector integrated with onpremises AD."
+  type        = bool
+}
+
 variable "onprem_root_dc_deploy_fsx" {
   description = "Deploy FSx integrated with onpremises AD"
   type        = bool
@@ -47,6 +58,16 @@ variable "onprem_root_dc_ec2_ami_owner" {
   type        = string
 }
 
+variable "onprem_root_dc_ec2_instance_type" {
+  description = "Instance type to use for the instance."
+  type        = string
+}
+
+variable "onprem_root_dc_ec2_launch_template" {
+  description = "Specifies a Launch Template to configure the instance. Parameters configured on this resource will override the corresponding parameters in the Launch Template."
+  type        = string
+}
+
 variable "onprem_root_dc_fsx_administrators_group" {
   description = "The name of the domain group whose members are granted administrative privileges for the file system."
   type        = string
@@ -58,6 +79,7 @@ variable "onprem_root_dc_fsx_ou" {
 }
 
 variable "onprem_root_dc_fsx_svc_username" {
+  default = "FSx_Svc"
   description = "The user name for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain."
   type        = string
 }
@@ -79,6 +101,11 @@ variable "onprem_root_dc_secret_kms_key" {
 
 variable "onprem_root_dc_security_group_id" {
   description = "The ID of the security group to be attached the instance."
+  type        = string
+}
+
+variable "onprem_root_dc_server_netbios_name" {
+  description = "The NetBIOS name for the server, such as ONPREM-DC01."
   type        = string
 }
 

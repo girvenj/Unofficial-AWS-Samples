@@ -111,7 +111,7 @@ Parameters:
       - 'One-Way: Incoming'
       - 'One-Way: Outgoing'
       - None
-    Default: Two-Way
+    Default: 'One-Way: Outgoing'
     Description: Trust Direction from AWS Managed Microsoft AD to on-premises domain.
     Type: String
 Metadata:
@@ -282,6 +282,8 @@ Resources:
       VpcId: !Ref VPC
   MadAdminSecret:
     Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       Name: !Sub MAD-Admin-Secret-${AWS::StackName}
       Description: Password for AWS Managed Microsoft AD
@@ -292,6 +294,8 @@ Resources:
         ExcludeCharacters: '"@/\'
   OnPremAdministratorSecret:
     Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       Name: !Sub OnPrem-Administrator-Secret-${AWS::StackName}
       Description: Administrator Password for Onpremises AD
@@ -302,6 +306,8 @@ Resources:
         ExcludeCharacters: '"@/\'
   RdsAdminSecret:
     Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       Name: !Sub RDS-Admin-Secret-${AWS::StackName}
       Description: Password for Amazon RDS Admin
@@ -2293,9 +2299,7 @@ Resources:
                               $Counter ++
                               Write-Output 'A record missing, registering it.'
                               Register-DnsClient
-                              If ($Counter -gt '1') {
-                                  Start-Sleep -Seconds 10
-                              }
+ 
                           }
                       } Until ($ARecordPresent -or $Counter -eq 12)
 
@@ -3100,12 +3104,12 @@ Resources:
 
                   $Modules = @(
                       @{
-                          Name    = 'NetworkingDsc'
-                          Version = '9.0.0'
-                      },
-                      @{
                           Name    = 'ActiveDirectoryDsc'
                           Version = '6.2.0'
+                      },
+                      @{
+                          Name    = 'AuditPolicyDsc'
+                          Version = '1.4.0.0'
                       },
                       @{
                           Name    = 'ComputerManagementDsc'
@@ -3116,8 +3120,12 @@ Resources:
                           Version = '3.0.0'
                       },
                       @{
-                          Name    = 'AuditPolicyDsc'
-                          Version = '1.4.0.0'
+                          Name    = 'NetworkingDsc'
+                          Version = '9.0.0'
+                      },
+                      @{
+                          Name    = 'PSReadline'
+                          Version = '2.2.6'
                       },
                       @{
                           Name    = 'SChannelDsc'
@@ -3473,10 +3481,10 @@ Resources:
                           AllNodes = @(
                               @{
                                   NodeName                    = '*'
-                                  #CertificateFile      = 'C:\Temp\publickeys\DscPublicKey.cer'
-                                  #Thumbprint           = $DscCertThumbprint
+                                  CertificateFile      = 'C:\Temp\publickeys\DscPublicKey.cer'
+                                  Thumbprint           = $DscCertThumbprint
                                   PSDscAllowDomainUser        = $true
-                                  PsDscAllowPlainTextPassword = $true
+                                  #PsDscAllowPlainTextPassword = $true
                               },
                               @{
                                   NodeName = 'localhost'
@@ -3589,6 +3597,14 @@ Resources:
                                   Ensure    = 'Present'
                                   Name      = 'GPMC'
                                   DependsOn = '[WindowsFeature]RSAT-ADDS'
+                              }
+                              Registry CrossForestGPO {
+                                  Ensure    = 'Present'  
+                                  Key       = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\System\'
+                                  ValueName = 'AllowX-ForestPolicy-and-RUP'
+                                  ValueType = 'Dword'
+                                  ValueData = '1'
+                                  Force     = $true
                               }
                               If ($DeploymentType -eq 'RootDomainController' -or $DeploymentType -eq 'ChildDomainController' -or $DeploymentType -eq 'AdditionalDomainController') {
                                   WindowsFeature DNS {
@@ -4021,7 +4037,7 @@ Resources:
                               $ExtendedRightsMap[$ErNamingContext.displayName] = [System.GUID]$ErNamingContext.rightsGuid
                           }
 
-                          $NullGuid = [guid]'00000000-0000-0000-0000-000000000000'
+                          $NullGuid = [System.Guid]::empty
 
                           $AclRules = @(
                               @{
@@ -4032,16 +4048,30 @@ Resources:
                                   InheritedObjectGuid                = $NullGuid
                               },
                               @{
-                                  ActiveDirectoryRights              = 'ExtendedRight'
+                                  ActiveDirectoryRights              = 'ListChildren, ReadProperty'
+                                  AccessControlType                  = 'Allow'
+                                  ObjectGUID                         = $NullGuid
+                                  ActiveDirectorySecurityInheritance = 'None'
+                                  InheritedObjectGuid                = $NullGuid
+                              },
+                              @{
+                                  ActiveDirectoryRights              = 'ReadProperty, WriteProperty'
+                                  AccessControlType                  = 'Allow'
+                                  ObjectGUID                         = $ExtendedRightsMap['Account Restrictions']
+                                  ActiveDirectorySecurityInheritance = 'Descendents'
+                                  InheritedObjectGuid                = $ComputerNameGuid
+                              },
+                              @{
+                                  ActiveDirectoryRights              = 'Self'
                                   AccessControlType                  = 'Allow'
                                   ObjectGUID                         = $ExtendedRightsMap['Validated write to service principal name']
                                   ActiveDirectorySecurityInheritance = 'Descendents'
                                   InheritedObjectGuid                = $ComputerNameGuid
                               },
                               @{
-                                  ActiveDirectoryRights              = 'ExtendedRight'
+                                  ActiveDirectoryRights              = 'Self'
                                   AccessControlType                  = 'Allow'
-                                  ObjectGUID                         = $ExtendedRightsMap['Account Restrictions']
+                                  ObjectGUID                         = $ExtendedRightsMap['Validated write to DNS host name']
                                   ActiveDirectorySecurityInheritance = 'Descendents'
                                   InheritedObjectGuid                = $ComputerNameGuid
                               },
@@ -4049,13 +4079,6 @@ Resources:
                                   ActiveDirectoryRights              = 'ExtendedRight'
                                   AccessControlType                  = 'Allow'
                                   ObjectGUID                         = $ExtendedRightsMap['Reset Password']
-                                  ActiveDirectorySecurityInheritance = 'Descendents'
-                                  InheritedObjectGuid                = $ComputerNameGuid
-                              },
-                              @{
-                                  ActiveDirectoryRights              = 'ExtendedRight'
-                                  AccessControlType                  = 'Allow'
-                                  ObjectGUID                         = $ExtendedRightsMap['Validated write to DNS host name']
                                   ActiveDirectorySecurityInheritance = 'Descendents'
                                   InheritedObjectGuid                = $ComputerNameGuid
                               }
@@ -4286,6 +4309,8 @@ Resources:
       VPCId: !Ref VPC
   RdsDB:
     Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Condition: YesIntegrateRDSwMAD
     Properties:
       AllocatedStorage: 20
@@ -4296,6 +4321,7 @@ Resources:
       DBInstanceClass: db.t3.xlarge
       DBInstanceIdentifier: RDS-MAD
       DBSubnetGroupName: !Ref RdsDBSubnetGroup
+      DeleteAutomatedBackups: true
       Domain: !Ref ManagedAD
       DomainIAMRoleName: !Ref RDSRole
       Engine: sqlserver-se
@@ -4314,6 +4340,8 @@ Resources:
           Value: !Sub RDS-MAD-${AWS::StackName}
   FSxMAD:
     Type: AWS::FSx::FileSystem
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Condition: YesIntegrateFsxMad
     Properties:
       FileSystemType: WINDOWS
@@ -4513,6 +4541,8 @@ Resources:
             - VPCCIDR: !GetAtt VPC.CidrBlock
   FSxOnprem:
     Type: AWS::FSx::FileSystem
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Condition: YesIntegrateFSxwSMMAD
     Properties:
       FileSystemType: WINDOWS

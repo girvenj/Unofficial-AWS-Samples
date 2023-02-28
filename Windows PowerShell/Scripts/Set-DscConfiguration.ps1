@@ -15,7 +15,7 @@
  .\Set-DscConfiguration.ps1
  #>
 
- Param (
+Param (
     [Bool]$RebootNodeIfNeeded = $False
 )
 
@@ -62,19 +62,19 @@ Configuration AwsDriversInstall {
         AwsDriverPnPInstaller ENA {
             Ensure        = 'Present'  
             DeviceName    = 'Amazon Elastic Network Adapter'
-            DriverVersion = '2.2.4.0'
+            DriverVersion = '2.4.0.0'
             URL           = 'https://s3.amazonaws.com/ec2-windows-drivers-downloads/ENA/Latest/AwsEnaNetworkDriver.zip'
         }
         AwsDriverPnPInstaller NVMe {
             Ensure        = 'Present'  
             DeviceName    = 'AWS NVMe Elastic Block Storage Adapter'
-            DriverVersion = '1.4.0.13'
+            DriverVersion = '1.4.1.21'
             URL           = 'https://s3.amazonaws.com/ec2-windows-drivers-downloads/NVMe/Latest/AWSNVMe.zip'
         }
         AwsDriverPvInstaller PV {
             Ensure        = 'Present'  
             DeviceName    = 'AWS PV Drivers'
-            DriverVersion = '8.4.1'
+            DriverVersion = '8.4.3'
             URL           = 'https://s3.amazonaws.com/ec2-windows-drivers-downloads/AWSPV/Latest/AWSPVDriver.zip'
         }
     }
@@ -592,7 +592,7 @@ Configuration SoftwareInstall {
         MsiInstaller EC2Launch {
             Ensure          = 'Present'  
             SoftwareName    = 'Amazon EC2Launch'
-            SoftwareVersion = '2.0.698.0'
+            SoftwareVersion = '2.0.1173.0'
             URL             = 'https://s3.amazonaws.com/amazon-ec2launch-v2/windows/amd64/latest/AmazonEC2Launch.msi'
         }
         MsiInstaller KinesisAgent {
@@ -610,7 +610,7 @@ Configuration SoftwareInstall {
         ExeInstaller SSMAgent {
             Ensure          = 'Present'  
             SoftwareName    = 'Amazon SSM Agent'
-            SoftwareVersion = '3.1.1004.0'
+            SoftwareVersion = '3.2.582.0'
             URL             = 'https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe'
         }
         <#DotNetOfflineInstall DotNet48 {

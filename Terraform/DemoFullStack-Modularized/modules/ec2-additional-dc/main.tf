@@ -144,11 +144,14 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
     AMI                       = data.aws_ami.ami.id
     EbsKmsKey                 = var.onprem_additional_dc_ebs_kms_key
     InstanceProfile           = aws_iam_instance_profile.ec2.id
+    InstanceType              = var.onprem_additional_dc_ec2_instance_type
+    LaunchTemplate            = var.onprem_additional_dc_ec2_launch_template
     OnPremAdministratorSecret = var.onprem_administrator_secret
     OnpremDomainName          = var.onprem_domain_fqdn
     OnpremNetBiosName         = var.onprem_domain_netbios
     ParentInstanceIP          = var.onprem_dc_ip
     SecurityGroupId           = var.onprem_additional_dc_security_group_id
+    ServerNetBIOSName         = var.onprem_additional_dc_server_netbios_name
     SsmAutoDocument           = var.onprem_additional_dc_ssm_docs[0]
     SubnetId                  = var.onprem_additional_dc_subnet_id
     VPCCIDR                   = var.onprem_additional_dc_vpc_cidr
@@ -166,7 +169,13 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
         Type: String
       InstanceProfile:
         Description: Instance profile and role to allow instances to use SSM Automation
-        Type: String  
+        Type: String
+      InstanceType:
+        Description: Instance type to use for the instance
+        Type: String
+      LaunchTemplate:
+        Description: Specifies a Launch Template to configure the instance
+        Type: String
       OnPremAdministratorSecret:
         Description: Secret containing the random password of the onpremises Microsoft AD Administrator account
         Type: String  
@@ -188,6 +197,9 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
       SecurityGroupId:
         Description: Security Group Id
         Type: AWS::EC2::SecurityGroup::Id
+      ServerNetBIOSName:
+        Description: The NetBIOS name for the server, such as Additional-DC01
+        Type: String
       SubnetId:
         Description: Subnet Id
         Type: AWS::EC2::Subnet::Id
@@ -222,8 +234,11 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
                 VolumeType: gp3
           IamInstanceProfile: !Ref InstanceProfile
           ImageId: !Ref AMI
-          InstanceType: m6i.large
+          InstanceType: !Ref InstanceType
           KeyName: Baseline
+          LaunchTemplate: 
+            LaunchTemplateId: !Ref LaunchTemplate
+            Version: 1
           SecurityGroupIds:
             - Ref: SecurityGroupId
           SubnetId: !Ref SubnetId
@@ -231,7 +246,7 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
             - Key: Domain
               Value: !Ref OnpremDomainName
             - Key: Name
-              Value: Additional-DC01
+              Value: !Ref ServerNetBIOSName
             - Key: Role
               Value: Domain Controller
           UserData:
@@ -246,17 +261,18 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
                       DomainNetBIOSName = '$${DomainDNSName}'
                       LogicalResourceId = 'AdditionalOnPremDomainController'
                       ParentInstanceIP = '$${ParentInstanceIP}'
-                      ServerNetBIOSName = 'Additional-DC01'
+                      ServerNetBIOSName = '$${ServerNetBIOSName}'
                       ServerRole = 'DomainController'
                       StackName = 'instance-additional-dc-${var.onprem_additional_dc_random_string}'
                       VPCCIDR = '$${VPCCIDR}'
                   }
                   Start-SSMAutomationExecution -DocumentName '$${SsmAutoDocument}' -Parameter $Params
                   </powershell>
-              - DomainDNSName: !Ref OnpremDomainName
+              - AdministratorSecretName: !Ref OnPremAdministratorSecret
+                DomainDNSName: !Ref OnpremDomainName
                 DomainNetBIOSName: !Ref OnpremNetBiosName
                 ParentInstanceIP: !Ref ParentInstanceIP
-                AdministratorSecretName: !Ref OnPremAdministratorSecret
+                ServerNetBIOSName: !Ref ServerNetBIOSName
                 VPCCIDR: !Ref VPCCIDR
     Outputs:
       additionalOnpremDomainControllerInstanceID:
@@ -273,6 +289,52 @@ STACK
 
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_additional_dc.outputs.additionalOnpremDomainControllerInstanceID
-  key         = "Patch Group"
+  key         = "PatchGroup"
   value       = var.onprem_additional_dc_patch_group_tag
+}
+
+data "aws_instance" "main" {
+  instance_id = aws_cloudformation_stack.instance_additional_dc.outputs.additionalOnpremDomainControllerInstanceID
+}
+
+resource "aws_ec2_tag" "eni" {
+  resource_id = data.aws_instance.main.network_interface_id
+  key         = "Name"
+  value       = var.onprem_additional_dc_server_netbios_name
+}
+
+data "aws_ebs_volume" "sda1" {
+  most_recent = true
+  filter {
+    name   = "attachment.device"
+    values = ["/dev/sda1"]
+  }
+  filter {
+    name   = "attachment.instance-id"
+    values = [aws_cloudformation_stack.instance_additional_dc.outputs.additionalOnpremDomainControllerInstanceID]
+  }
+}
+
+data "aws_ebs_volume" "xvdf" {
+  most_recent = true
+  filter {
+    name   = "attachment.device"
+    values = ["/dev/xvdf"]
+  }
+  filter {
+    name   = "attachment.instance-id"
+    values = [aws_cloudformation_stack.instance_additional_dc.outputs.additionalOnpremDomainControllerInstanceID]
+  }
+}
+
+resource "aws_ec2_tag" "sda1" {
+  resource_id = data.aws_ebs_volume.sda1.id
+  key         = "Name"
+  value       = var.onprem_additional_dc_server_netbios_name
+}
+
+resource "aws_ec2_tag" "xvdf" {
+  resource_id = data.aws_ebs_volume.xvdf.id
+  key         = "Name"
+  value       = var.onprem_additional_dc_server_netbios_name
 }

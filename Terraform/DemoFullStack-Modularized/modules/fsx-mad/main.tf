@@ -64,3 +64,10 @@ resource "aws_fsx_windows_file_system" "main" {
     Name = "${var.fsx_mad_alias}-${var.fsx_mad_random_string}"
   }
 }
+
+resource "aws_ec2_tag" "eni" {
+  for_each    = aws_fsx_windows_file_system.main.network_interface_ids
+  resource_id = each.value
+  key         = "Name"
+  value       = "${var.fsx_mad_alias}-${var.fsx_mad_random_string}"
+}

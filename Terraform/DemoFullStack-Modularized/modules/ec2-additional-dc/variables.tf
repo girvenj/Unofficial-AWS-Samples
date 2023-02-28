@@ -13,6 +13,16 @@ variable "onprem_additional_dc_ec2_ami_owner" {
   type        = string
 }
 
+variable "onprem_additional_dc_ec2_instance_type" {
+  description = "Instance type to use for the instance."
+  type        = string
+}
+
+variable "onprem_additional_dc_ec2_launch_template" {
+  description = "Specifies a Launch Template to configure the instance. Parameters configured on this resource will override the corresponding parameters in the Launch Template."
+  type        = string
+}
+
 variable "onprem_additional_dc_patch_group_tag" {
   description = "Tag value for maintenance window and association application."
   type        = string
@@ -25,6 +35,11 @@ variable "onprem_additional_dc_random_string" {
 
 variable "onprem_additional_dc_security_group_id" {
   description = "The ID of the security group to be attached the instance."
+  type        = string
+}
+
+variable "onprem_additional_dc_server_netbios_name" {
+  description = "The NetBIOS name for the server, such as Additional-DC01."
   type        = string
 }
 

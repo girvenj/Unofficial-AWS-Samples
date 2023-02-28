@@ -51,7 +51,7 @@ data "aws_iam_policy_document" "ec2" {
   statement {
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     effect    = "Allow"
-    resources = [module.store_secret_administrator.secret_id, module.store_secret_fsx_svc.secret_id, var.mad_admin_secret]
+    resources = [module.store_secret_administrator.secret_id, module.store_secret_cad_svc.secret_id, module.store_secret_fsx_svc.secret_id, var.mad_admin_secret]
   }
   statement {
     actions   = ["ec2:DescribeInstances", "ec2:DescribeSecurityGroups", "ssm:DescribeInstanceInformation", "ssm:GetAutomationExecution", "ssm:ListCommands", "ssm:ListCommandInvocations", "ds:CreateConditionalForwarder", "ds:CreateTrust", "ds:DescribeTrusts", "ds:VerifyTrust"]
@@ -155,6 +155,12 @@ resource "random_password" "fsx_svc" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
+resource "random_password" "adc_svc" {
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
 module "store_secret_administrator" {
   source                  = "../secret"
   name                    = "${var.onprem_root_dc_domain_fqdn}-Onprem-Administrator-Secret-${var.onprem_root_dc_random_string}"
@@ -173,23 +179,36 @@ module "store_secret_fsx_svc" {
   secret_kms_key          = var.onprem_root_dc_secret_kms_key
 }
 
+module "store_secret_cad_svc" {
+  source                  = "../secret"
+  name                    = "${var.onprem_root_dc_domain_fqdn}-Onprem-CAD-Svc-Secret-${var.onprem_root_dc_random_string}"
+  username                = var.onprem_root_dc_adc_svc_username
+  password                = random_password.adc_svc.result
+  recovery_window_in_days = 0
+  secret_kms_key          = var.onprem_root_dc_secret_kms_key
+}
+
 resource "aws_cloudformation_stack" "instance_root_dc" {
   name = "instance-root-dc-${var.onprem_root_dc_random_string}"
   parameters = {
+    AdcSvcSecret              = module.store_secret_cad_svc.secret_id
     AMI                       = data.aws_ami.ami.id
     EbsKmsKey                 = var.onprem_root_dc_ebs_kms_key
     FsxOnpremAdmins           = var.onprem_root_dc_fsx_administrators_group
     FsxOnpremParentOu         = var.onprem_root_dc_fsx_ou
     FsxOnpremSvcSecret        = module.store_secret_fsx_svc.secret_id
-    FsxOnpremSvcUn            = var.onprem_root_dc_fsx_svc_username
+    IntegrateAdConnector      = tostring(var.onprem_root_dc_deploy_adc)
     IntegrateFsxOnprem        = tostring(var.onprem_root_dc_deploy_fsx)
     InstanceProfile           = aws_iam_instance_profile.ec2.id
+    InstanceType              = var.onprem_root_dc_ec2_instance_type
+    LaunchTemplate            = var.onprem_root_dc_ec2_launch_template
     MadAdminSecret            = var.mad_admin_secret
     MadDomainName             = var.mad_domain_fqdn
     OnPremAdministratorSecret = module.store_secret_administrator.secret_id
     OnpremDomainName          = var.onprem_root_dc_domain_fqdn
     OnpremNetBiosName         = var.onprem_root_dc_domain_netbios
     SecurityGroupId           = var.onprem_root_dc_security_group_id
+    ServerNetBIOSName         = var.onprem_root_dc_server_netbios_name
     SsmAutoDocument           = var.onprem_root_dc_ssm_docs[0]
     SubnetId                  = var.onprem_root_dc_subnet_id
     TrustDirection            = var.mad_trust_direction
@@ -198,6 +217,9 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
   template_body = <<STACK
     AWSTemplateFormatVersion: '2010-09-09'
     Parameters:
+      AdcSvcSecret:
+        Description: Secret containing the random password of the onpremises Microsoft AD AD Connector account
+        Type: String
       AMI:
         #Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
@@ -214,17 +236,26 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
       FsxOnpremSvcSecret:
         Description: The secret containing the password for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain
         Type: String
-      FsxOnpremSvcUn:
-        Description: The user name for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain
-        Type: String
       InstanceProfile:
         Description: Instance profile and role to allow instances to use SSM Automation
+        Type: String
+      InstanceType:
+        Description: Instance type to use for the instance
+        Type: String
+      IntegrateAdConnector:
+        AllowedValues:
+          - 'true'
+          - 'false'
+        Description: Deploy & Integrate AWS AD Connector with On-Premises AD
         Type: String
       IntegrateFsxOnprem:
         AllowedValues:
           - 'true'
           - 'false'
         Description: Deploy & Integrate Amazon FSX for Windows with On-Premises AD
+        Type: String
+      LaunchTemplate:
+        Description: Specifies a Launch Template to configure the instance
         Type: String
       MadAdminSecret:
         Description: Secret containing the random password of the AWS Managed Microsoft AD Admin account
@@ -253,12 +284,15 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
       SecurityGroupId:
         Description: Security Group Id
         Type: AWS::EC2::SecurityGroup::Id
-      SubnetId:
-        Description: Subnet Id
-        Type: AWS::EC2::Subnet::Id
+      ServerNetBIOSName:
+        Description: The NetBIOS name for the server, such as ONPREM-DC01
+        Type: String
       SsmAutoDocument:
         Description: SSM Automation Document used to configure the instances
         Type: String
+      SubnetId:
+        Description: Subnet Id
+        Type: AWS::EC2::Subnet::Id
       TrustDirection:
         AllowedValues:
           - Two-Way
@@ -295,8 +329,11 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
                 VolumeType: gp3
           IamInstanceProfile: !Ref InstanceProfile
           ImageId: !Ref AMI
-          InstanceType: m6i.large
+          InstanceType: !Ref InstanceType
           KeyName: Baseline
+          LaunchTemplate: 
+            LaunchTemplateId: !Ref LaunchTemplate
+            Version: 1
           SecurityGroupIds:
             - Ref: SecurityGroupId
           SubnetId: !Ref SubnetId
@@ -304,7 +341,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
               - Key: Domain
                 Value: !Ref OnpremDomainName
               - Key: Name
-                Value: ONPREM-DC01
+                Value: !Ref ServerNetBIOSName
               - Key: Role
                 Value: Domain Controller
           UserData:
@@ -312,6 +349,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
               - |
                   <powershell>
                   $Params = @{
+                      AdConnectorSvcSecret = '$${AdcSvcSecret}'
                       DeployPki = 'No'
                       DeploymentType = 'RootDomainController'
                       DomainDNSName = '$${DomainDNSName}'
@@ -319,12 +357,12 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
                       FsxOnpremAdmins = '$${FsxOnpremAdmins}'
                       FsxOnpremParentOu = '$${FsxOnpremParentOu}'
                       FsxOnpremSvcSecret = '$${FsxOnpremSvcSecret}'
-                      FsxOnpremSvcUn = '$${FsxOnpremSvcUn}'
+                      IntegrateAdConnector = '$${IntegrateAdConnector}'
                       IntegrateFsxOnprem = '$${IntegrateFsxOnprem}'
                       LogicalResourceId = 'OnPremDomainController'
                       MadDNSName = '$${MadDNSName}'
                       AdministratorSecretName = '$${AdministratorSecretName}'
-                      ServerNetBIOSName = 'ONPREM-DC01'
+                      ServerNetBIOSName = '$${ServerNetBIOSName}'
                       ServerRole = 'DomainController'
                       StackName = 'instance-root-dc-${var.onprem_root_dc_random_string}'
                       TrustDirection = '$${TrustDirection}'
@@ -333,14 +371,16 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
                   }
                   Start-SSMAutomationExecution -DocumentName '$${SsmAutoDocument}' -Parameter $Params
                   </powershell>
-              - DomainDNSName: !Ref OnpremDomainName
+              - AdcSvcSecret: !Ref AdcSvcSecret
+                AdministratorSecretName: !Ref OnPremAdministratorSecret
+                DomainDNSName: !Ref OnpremDomainName
                 FsxOnpremAdmins: !Ref FsxOnpremAdmins
                 FsxOnpremParentOu: !Ref FsxOnpremParentOu
                 FsxOnpremSvcSecret: !Ref FsxOnpremSvcSecret
-                FsxOnpremSvcUn: !Ref FsxOnpremSvcUn
+                IntegrateAdConnector: !Ref IntegrateAdConnector
                 IntegrateFsxOnprem: !Ref IntegrateFsxOnprem
                 MadDNSName: !Ref MadDomainName
-                AdministratorSecretName: !Ref OnPremAdministratorSecret
+                ServerNetBIOSName: !Ref ServerNetBIOSName
                 TrustDirection: !Ref TrustDirection
                 TrustSecretName: !Ref MadAdminSecret
                 VPCCIDR: !Ref VPCCIDR
@@ -356,10 +396,57 @@ STACK
     create = "120m"
   }
 }
+
+data "aws_instance" "main" {
+  instance_id = aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstanceID
+}
+
+resource "aws_ec2_tag" "eni" {
+  resource_id = data.aws_instance.main.network_interface_id
+  key         = "Name"
+  value       = var.onprem_root_dc_server_netbios_name
+}
+
+data "aws_ebs_volume" "sda1" {
+  most_recent = true
+  filter {
+    name   = "attachment.device"
+    values = ["/dev/sda1"]
+  }
+  filter {
+    name   = "attachment.instance-id"
+    values = [aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstanceID]
+  }
+}
+
+data "aws_ebs_volume" "xvdf" {
+  most_recent = true
+  filter {
+    name   = "attachment.device"
+    values = ["/dev/xvdf"]
+  }
+  filter {
+    name   = "attachment.instance-id"
+    values = [aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstanceID]
+  }
+}
+
+resource "aws_ec2_tag" "sda1" {
+  resource_id = data.aws_ebs_volume.sda1.id
+  key         = "Name"
+  value       = var.onprem_root_dc_server_netbios_name
+}
+
+resource "aws_ec2_tag" "xvdf" {
+  resource_id = data.aws_ebs_volume.xvdf.id
+  key         = "Name"
+  value       = var.onprem_root_dc_server_netbios_name
+}
+
 /*
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstanceID
-  key         = "Patch Group"
+  key         = "PatchGroup"
   value       = var.onprem_root_dc_patch_group_tag
 }
 */

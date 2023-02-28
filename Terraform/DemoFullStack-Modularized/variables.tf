@@ -8,6 +8,20 @@ variable "aws_region_secondary" {
   type        = string
 }
 
+variable "cad_size" {
+  description = "The size of the directory (Small or Large are accepted values). Large by default."
+  type        = string
+  validation {
+    condition     = contains(["Small", "Large"], var.cad_size)
+    error_message = "The size value must be Small or Large."
+  }
+}
+
+variable "default_ec2_instance_type" {
+  description = "Instance type to use for the instances."
+  type        = string
+}
+
 variable "ec2_ami_name" {
   description = "Name of the AMI that was provided during image creation."
   type        = string
@@ -128,18 +142,43 @@ variable "mad_edition" {
   }
 }
 
+variable "mad_mgmt_server_netbios_name" {
+  description = "The NetBIOS name for the server, such as MAD-MGMT01."
+  type        = string
+}
+
 variable "mad_trust_direction" {
   description = "Direction of trust between MAD and onpremises AD."
   type        = string
   validation {
     condition     = contains(["None", "Two-Way", "One-Way: Incoming", "One-Way: Outgoing"], var.mad_trust_direction)
-    error_message = "The edition value must be None, Two-Way, One-Way: Incoming, or One-Way: Outgoing."
+    error_message = "The value must be None, Two-Way, One-Way: Incoming, or One-Way: Outgoing."
   }
+}
+
+variable "onprem_child_dc_server_netbios_name" {
+  description = "The NetBIOS name for the server, such as CHILD-DC01."
+  type        = string
 }
 
 variable "onprem_child_domain_netbios" {
   description = "The NetBIOS name for the domain, such as CHILD."
   type        = string
+}
+
+variable "onprem_root_dc_adc_svc_username" {
+  description = "The user name for the service account on your self-managed AD domain for AD Connector."
+  type        = string
+}
+
+variable "onprem_root_additional_dc_server_netbios_name" {
+  description = "The NetBIOS name for the server, such as Additional-DC01."
+  type        = string
+}
+
+variable "onprem_root_dc_deploy_adc" {
+  description = "Deploy AD Connector integrated with onpremises AD."
+  type        = bool
 }
 
 variable "onprem_root_dc_deploy_fsx" {
@@ -169,6 +208,16 @@ variable "onprem_root_dc_fsx_ou" {
 
 variable "onprem_root_dc_fsx_svc_username" {
   description = "The user name for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain."
+  type        = string
+}
+
+variable "onprem_root_dc_server_netbios_name" {
+  description = "The NetBIOS name for the server, such as ONPREM-DC01."
+  type        = string
+}
+
+variable "onprem_root_pki_server_netbios_name" {
+  description = "The NetBIOS name for the server, such as ONPREM-PKI01."
   type        = string
 }
 

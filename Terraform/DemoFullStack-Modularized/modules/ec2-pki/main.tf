@@ -144,10 +144,13 @@ resource "aws_cloudformation_stack" "instance_pki" {
     AMI                       = data.aws_ami.ami.id
     EbsKmsKey                 = var.onprem_pki_ebs_kms_key
     InstanceProfile           = aws_iam_instance_profile.ec2.id
+    InstanceType              = var.onprem_pki_ec2_instance_type
+    LaunchTemplate            = var.onprem_pki_ec2_launch_template
     OnPremAdministratorSecret = var.onprem_administrator_secret
     OnpremDomainName          = var.onprem_domain_fqdn
     OnpremNetBiosName         = var.onprem_domain_netbios
     SecurityGroupId           = var.onprem_pki_security_group_id
+    ServerNetBIOSName         = var.onprem_pki_server_netbios_name
     SsmAutoDocument           = var.onprem_pki_ssm_docs[0]
     SubnetId                  = var.onprem_pki_subnet_id
     VPCCIDR                   = var.onprem_pki_vpc_cidr
@@ -165,6 +168,12 @@ resource "aws_cloudformation_stack" "instance_pki" {
         Type: String
       InstanceProfile:
         Description: Instance profile and role to allow instances to use SSM Automation
+        Type: String
+      InstanceType:
+        Description: Instance type to use for the instance
+        Type: String
+      LaunchTemplate:
+        Description: Specifies a Launch Template to configure the instance
         Type: String
       OnPremAdministratorSecret:
         Description: Secret containing the random password of the onpremises Microsoft AD Administrator account
@@ -184,6 +193,9 @@ resource "aws_cloudformation_stack" "instance_pki" {
       SecurityGroupId:
         Description: Security Group Id
         Type: AWS::EC2::SecurityGroup::Id
+      ServerNetBIOSName:
+        Description: The NetBIOS name for the server, such as ONPREM-PKI01
+        Type: String
       SubnetId:
         Description: Subnet Id
         Type: AWS::EC2::Subnet::Id
@@ -218,14 +230,17 @@ resource "aws_cloudformation_stack" "instance_pki" {
                   DeleteOnTermination: true
             IamInstanceProfile: !Ref InstanceProfile
             ImageId: !Ref AMI
-            InstanceType: m6i.large
+            InstanceType: !Ref InstanceType
             KeyName: Baseline
+            LaunchTemplate: 
+              LaunchTemplateId: !Ref LaunchTemplate
+              Version: 1
             SecurityGroupIds:
               - !Ref SecurityGroupId
             SubnetId: !Ref SubnetId
             Tags:
               - Key: Name
-                Value: ONPREM-PKI01
+                Value: !Ref ServerNetBIOSName
               - Key: Domain
                 Value: !Ref OnpremDomainName
               - Key: Role
@@ -242,16 +257,17 @@ resource "aws_cloudformation_stack" "instance_pki" {
                         DomainType = 'SelfManagedAD'
                         LogicalResourceId = 'OnpremPkiInstance'
                         AdministratorSecretName = '$${AdministratorSecretName}'
-                        ServerNetBIOSName = 'ONPREM-PKI01'
+                        ServerNetBIOSName = '$${ServerNetBIOSName}'
                         ServerRole = 'CertificateAuthority'
                         StackName = 'instance-pki-${var.onprem_pki_random_string}'
                         VPCCIDR = '$${VPCCIDR}'
                     }
                     Start-SSMAutomationExecution -DocumentName '$${SsmAutoDocument}' -Parameter $Params
                     </powershell>
-                - DomainDNSName: !Ref OnpremDomainName
+                - AdministratorSecretName: !Ref OnPremAdministratorSecret
+                  DomainDNSName: !Ref OnpremDomainName
                   DomainNetBIOSName: !Ref OnpremNetBiosName
-                  AdministratorSecretName: !Ref OnPremAdministratorSecret
+                  ServerNetBIOSName: !Ref ServerNetBIOSName
                   VPCCIDR: !Ref VPCCIDR
     Outputs:
       OnpremPkiInstanceID:
@@ -268,6 +284,52 @@ STACK
 
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_pki.outputs.OnpremPkiInstanceID
-  key         = "Patch Group"
+  key         = "PatchGroup"
   value       = var.onprem_pki_patch_group_tag
+}
+
+data "aws_instance" "main" {
+  instance_id = aws_cloudformation_stack.instance_pki.outputs.OnpremPkiInstanceID
+}
+
+resource "aws_ec2_tag" "eni" {
+  resource_id = data.aws_instance.main.network_interface_id
+  key         = "Name"
+  value       = var.onprem_pki_server_netbios_name
+}
+
+data "aws_ebs_volume" "sda1" {
+  most_recent = true
+  filter {
+    name   = "attachment.device"
+    values = ["/dev/sda1"]
+  }
+  filter {
+    name   = "attachment.instance-id"
+    values = [aws_cloudformation_stack.instance_pki.outputs.OnpremPkiInstanceID]
+  }
+}
+
+data "aws_ebs_volume" "xvdf" {
+  most_recent = true
+  filter {
+    name   = "attachment.device"
+    values = ["/dev/xvdf"]
+  }
+  filter {
+    name   = "attachment.instance-id"
+    values = [aws_cloudformation_stack.instance_pki.outputs.OnpremPkiInstanceID]
+  }
+}
+
+resource "aws_ec2_tag" "sda1" {
+  resource_id = data.aws_ebs_volume.sda1.id
+  key         = "Name"
+  value       = var.onprem_pki_server_netbios_name
+}
+
+resource "aws_ec2_tag" "xvdf" {
+  resource_id = data.aws_ebs_volume.xvdf.id
+  key         = "Name"
+  value       = var.onprem_pki_server_netbios_name
 }

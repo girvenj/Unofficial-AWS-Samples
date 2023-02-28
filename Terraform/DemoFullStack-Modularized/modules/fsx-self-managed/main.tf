@@ -71,3 +71,10 @@ resource "aws_fsx_windows_file_system" "main" {
     username                               = var.fsx_self_username
   }
 }
+
+resource "aws_ec2_tag" "eni" {
+  for_each    = aws_fsx_windows_file_system.main.network_interface_ids
+  resource_id = each.value
+  key         = "Name"
+  value       = "${var.fsx_self_alias}-${var.fsx_self_random_string}"
+}
