@@ -678,32 +678,66 @@ resource "aws_ssm_association" "fsx_onpremises_alias" {
   }
 }*/
 
-/*module "ssm_updates_software_secondary" {
-  source                             = "./modules/ssm-associations"
-  providers                          = { aws = aws.secondary }
-  ssm_association_approve_after_days = var.ssm_association_approve_after_days
-  ssm_association_deployment_rate    = var.ssm_association_deployment_rate
-  ssm_association_inventory_rate     = var.ssm_association_inventory_rate
-  ssm_association_max_concurrency    = var.ssm_association_max_concurrency
-  ssm_association_max_errors         = var.ssm_association_max_errors
-  ssm_association_patch_group_tag    = "${var.patch_group_tag}-${random_string.random_string.result}"
-  ssm_association_random_string      = random_string.random_string.result
-}*/
+module "ssm_updates_software_secondary" {
+  source                                       = "./modules/ssm-associations"
+  providers                                    = { aws = aws.secondary }
+  ssm_association_approve_after_days           = var.ssm_association_approve_after_days
+  ssm_association_driver_deployment_rate       = var.ssm_association_driver_deployment_rate
+  ssm_association_launch_agent_deployment_rate = var.ssm_association_launch_agent_deployment_rate
+  ssm_association_patching_deployment_rate     = var.ssm_association_patching_deployment_rate
+  ssm_association_ssm_agent_deployment_rate    = var.ssm_association_ssm_agent_deployment_rate
+  ssm_association_inventory_rate               = var.ssm_association_inventory_rate
+  ssm_association_max_concurrency              = var.ssm_association_max_concurrency
+  ssm_association_max_errors                   = var.ssm_association_max_errors
+  ssm_association_patch_group_tag              = "${var.patch_group_tag}-${random_string.random_string.result}"
+  ssm_association_random_string                = random_string.random_string.result
+}
 
 module "ssm_updates_software" {
-  source                             = "./modules/ssm-associations"
-  ssm_association_approve_after_days = var.ssm_association_approve_after_days
-  ssm_association_deployment_rate    = var.ssm_association_deployment_rate
-  ssm_association_inventory_rate     = var.ssm_association_inventory_rate
-  ssm_association_max_concurrency    = var.ssm_association_max_concurrency
-  ssm_association_max_errors         = var.ssm_association_max_errors
-  ssm_association_patch_group_tag    = "${var.patch_group_tag}-${random_string.random_string.result}"
-  ssm_association_random_string      = random_string.random_string.result
+  source                                       = "./modules/ssm-associations"
+  ssm_association_approve_after_days           = var.ssm_association_approve_after_days
+  ssm_association_driver_deployment_rate       = var.ssm_association_driver_deployment_rate
+  ssm_association_launch_agent_deployment_rate = var.ssm_association_launch_agent_deployment_rate
+  ssm_association_patching_deployment_rate     = var.ssm_association_patching_deployment_rate
+  ssm_association_ssm_agent_deployment_rate    = var.ssm_association_ssm_agent_deployment_rate
+  ssm_association_inventory_rate               = var.ssm_association_inventory_rate
+  ssm_association_max_concurrency              = var.ssm_association_max_concurrency
+  ssm_association_max_errors                   = var.ssm_association_max_errors
+  ssm_association_patch_group_tag              = "${var.patch_group_tag}-${random_string.random_string.result}"
+  ssm_association_random_string                = random_string.random_string.result
   depends_on = [
     module.onprem_pki_instance
   ]
 }
 
+data "aws_iam_policy_document" "amazon_ssm_managed_ec2_instance_default_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["ssm.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "amazon_ssm_managed_ec2_instance_default_role" {
+  name               = "Amazon-SSM-Managed-EC2-Instance-Default-Role-${random_string.random_string.result}"
+  assume_role_policy = data.aws_iam_policy_document.amazon_ssm_managed_ec2_instance_default_role.json
+  managed_policy_arns = [
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/AmazonSSMManagedEC2InstanceDefaultPolicy"
+  ]
+  tags = {
+    Name = "Amazon-SSM-Managed-EC2-Instance-Default-Role-${random_string.random_string.result}"
+  }
+}
+
+resource "aws_ssm_service_setting" "test_setting" {
+  setting_id    = "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:servicesetting/ssm/managed-instance/default-ec2-instance-management-role"
+  setting_value = "service-role/${aws_iam_role.amazon_ssm_managed_ec2_instance_default_role.name}"
+}
+
+/*
 resource "aws_ec2_tag" "onprem_root_dc_instance" {
   resource_id = module.onprem_root_dc_instance.onprem_ad_instance_id
   key         = "PatchGroup"
@@ -713,7 +747,6 @@ resource "aws_ec2_tag" "onprem_root_dc_instance" {
   #]
 }
 
-/*
 resource "aws_acmpca_certificate_authority" "root" {
   type = "ROOT"
 

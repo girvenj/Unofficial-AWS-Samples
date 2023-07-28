@@ -17,7 +17,7 @@ Description: >-
     9.	Opt: (1) Single AZ Amazon FSX for Windows Server joined to self-managed AD (32GB SSD and 16 MB/s Tcap)
 Parameters:
   AMI:
-    Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+    Default: /aws/service/ami-windows-latest/TPM-Windows_Server-2022-English-Full-Base
     Description: System Manager parameter value for latest Windows Server AMI
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
   CreateChildDomain:
@@ -196,7 +196,7 @@ Resources:
         - Fn::GetAZs: !Ref AWS::Region
       CidrBlock: !Select
         - 0
-        - !Cidr
+        - Fn::Cidr:
           - !GetAtt VPC.CidrBlock
           - 2
           - 6
@@ -236,7 +236,7 @@ Resources:
         - Fn::GetAZs: !Ref AWS::Region
       CidrBlock: !Select
         - 1
-        - !Cidr
+        - Fn::Cidr:
           - !GetAtt VPC.CidrBlock
           - 2
           - 6

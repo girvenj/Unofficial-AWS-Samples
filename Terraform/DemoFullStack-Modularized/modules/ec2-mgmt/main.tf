@@ -165,7 +165,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
     AWSTemplateFormatVersion: '2010-09-09'
     Parameters:
       AMI:
-        #Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+        #Default: /aws/service/ami-windows-latest/TPM-Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
         Type: String
       DeployMadPki:
@@ -272,7 +272,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
             - Key: Domain
               Value: !Ref MadDomainName
             - Key: Role
-              Value: Enterpise CA
+              Value: Management Instance
           UserData:
             Fn::Base64: !Sub
               - |

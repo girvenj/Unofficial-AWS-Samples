@@ -23,6 +23,10 @@ locals {
 
   aws_ssm_patchbaselinelinux = [
     {
+      friendly_name    = "AlmaLinux"
+      operating_system = "ALMA_LINUX"
+    },
+    {
       friendly_name    = "Amazon-Linux"
       operating_system = "AMAZON_LINUX"
     },
@@ -33,6 +37,10 @@ locals {
     {
       friendly_name    = "Amazon-Linux-2022"
       operating_system = "AMAZON_LINUX_2022"
+    },
+    {
+      friendly_name    = "Amazon-Linux-2023"
+      operating_system = "AMAZON_LINUX_2023"
     },
     {
       friendly_name    = "CentOS-Linux"
@@ -246,13 +254,14 @@ resource "aws_ssm_patch_group" "windows" {
   patch_group = var.ssm_association_patch_group_tag
 }
 
-resource "aws_ssm_association" "main" {
-  association_name    = "${each.value}-DailyCheck-${var.ssm_association_random_string}"
-  compliance_severity = "HIGH"
-  for_each            = toset(local.aws_ssm_association_drivers)
-  max_concurrency     = var.ssm_association_max_concurrency
-  max_errors          = var.ssm_association_max_errors
-  name                = "AWS-ConfigureAWSPackage"
+resource "aws_ssm_association" "drivers" {
+  apply_only_at_cron_interval = true
+  association_name            = "${each.value}-DailyCheck-${var.ssm_association_random_string}"
+  compliance_severity         = "HIGH"
+  for_each                    = toset(local.aws_ssm_association_drivers)
+  max_concurrency             = var.ssm_association_max_concurrency
+  max_errors                  = var.ssm_association_max_errors
+  name                        = "AWS-ConfigureAWSPackage"
   parameters = {
     action              = "Install"
     additionalArguments = "{}"
@@ -260,7 +269,7 @@ resource "aws_ssm_association" "main" {
     name                = each.value
     version             = ""
   }
-  schedule_expression = "rate(24 Hours)"
+  schedule_expression = var.ssm_association_driver_deployment_rate
   targets {
     key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
@@ -268,11 +277,12 @@ resource "aws_ssm_association" "main" {
 }
 
 resource "aws_ssm_association" "launch-agent" {
-  association_name    = "AWSEC2Launch-Agent-DailyCheck-${var.ssm_association_random_string}"
-  compliance_severity = "HIGH"
-  max_concurrency     = var.ssm_association_max_concurrency
-  max_errors          = var.ssm_association_max_errors
-  name                = "AWS-ConfigureAWSPackage"
+  apply_only_at_cron_interval = false
+  association_name            = "AWSEC2Launch-Agent-DailyCheck-${var.ssm_association_random_string}"
+  compliance_severity         = "HIGH"
+  max_concurrency             = var.ssm_association_max_concurrency
+  max_errors                  = var.ssm_association_max_errors
+  name                        = "AWS-ConfigureAWSPackage"
   parameters = {
     action              = "Install"
     additionalArguments = "{}"
@@ -280,20 +290,21 @@ resource "aws_ssm_association" "launch-agent" {
     name                = "AWSEC2Launch-Agent"
     version             = ""
   }
-  schedule_expression = "rate(24 Hours)"
+  schedule_expression = var.ssm_association_launch_agent_deployment_rate
   targets {
     key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
   }
 }
 
-resource "aws_ssm_association" "ssm" {
-  association_name    = "UpdateSSMAgent-Agent-DailyCheck-${var.ssm_association_random_string}"
-  compliance_severity = "HIGH"
-  max_concurrency     = var.ssm_association_max_concurrency
-  max_errors          = var.ssm_association_max_errors
-  name                = "AWS-UpdateSSMAgent"
-  schedule_expression = "rate(24 Hours)"
+resource "aws_ssm_association" "ssm-agent" {
+  apply_only_at_cron_interval = false
+  association_name            = "UpdateSSMAgent-Agent-DailyCheck-${var.ssm_association_random_string}"
+  compliance_severity         = "HIGH"
+  max_concurrency             = var.ssm_association_max_concurrency
+  max_errors                  = var.ssm_association_max_errors
+  name                        = "AWS-UpdateSSMAgent"
+  schedule_expression         = var.ssm_association_ssm_agent_deployment_rate
   targets {
     key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
@@ -301,9 +312,10 @@ resource "aws_ssm_association" "ssm" {
 }
 
 resource "aws_ssm_association" "software-inventory" {
-  association_name    = "GatherSoftwareInventory-Agent-DailyCheck-${var.ssm_association_random_string}"
-  compliance_severity = "CRITICAL"
-  name                = "AWS-GatherSoftwareInventory"
+  apply_only_at_cron_interval = false
+  association_name            = "GatherSoftwareInventory-Agent-DailyCheck-${var.ssm_association_random_string}"
+  compliance_severity         = "CRITICAL"
+  name                        = "AWS-GatherSoftwareInventory"
   parameters = {
     applications                = "Enabled"
     awsComponents               = "Enabled"
@@ -315,7 +327,23 @@ resource "aws_ssm_association" "software-inventory" {
     windowsRoles                = "Enabled"
     windowsUpdates              = "Enabled"
   }
-  schedule_expression = "rate(6 Hours)"
+  schedule_expression = var.ssm_association_inventory_rate
+  targets {
+    key    = "tag:PatchGroup"
+    values = [var.ssm_association_patch_group_tag]
+  }
+}
+
+resource "aws_ssm_association" "patching" {
+  apply_only_at_cron_interval = true
+  association_name            = "RunPatchBaseline-DailyCheck-${var.ssm_association_random_string}"
+  compliance_severity         = "CRITICAL"
+  name                        = "AWS-RunPatchBaseline"
+  parameters = {
+    Operation    = "Install"
+    RebootOption = "RebootIfNeeded"
+  }
+  schedule_expression = var.ssm_association_patching_deployment_rate
   targets {
     key    = "tag:PatchGroup"
     values = [var.ssm_association_patch_group_tag]
@@ -331,7 +359,7 @@ resource "aws_ssm_resource_data_sync" "main" {
   }
 }
 
-resource "aws_ssm_maintenance_window" "main" {
+/*resource "aws_ssm_maintenance_window" "main" {
   allow_unassociated_targets = true
   cutoff                     = 0
   duration                   = 1
@@ -378,9 +406,9 @@ resource "aws_ssm_maintenance_window_task" "main" {
       }
     }
   }
-}
+}*/
 
-data "aws_iam_policy_document" "amazon_ssm_managed_ec2_instance_default_role" {
+/*data "aws_iam_policy_document" "amazon_ssm_managed_ec2_instance_default_role" {
   statement {
     actions = ["sts:AssumeRole"]
     effect  = "Allow"
@@ -405,4 +433,4 @@ resource "aws_iam_role" "amazon_ssm_managed_ec2_instance_default_role" {
 resource "aws_ssm_service_setting" "test_setting" {
   setting_id    = "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:servicesetting/ssm/managed-instance/default-ec2-instance-management-role"
   setting_value = "service-role/${aws_iam_role.amazon_ssm_managed_ec2_instance_default_role.name}"
-}
+}*/

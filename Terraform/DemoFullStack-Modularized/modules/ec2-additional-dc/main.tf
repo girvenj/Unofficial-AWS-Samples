@@ -161,7 +161,7 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
     AWSTemplateFormatVersion: '2010-09-09'
     Parameters:
       AMI:
-        #Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+        #Default: /aws/service/ami-windows-latest/TPM-Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
         Type: String
       EbsKmsKey:

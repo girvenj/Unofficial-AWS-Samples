@@ -58,7 +58,7 @@ resource "aws_subnet" "public_subnet3" {
 resource "aws_subnet" "nat_subnet1" {
   availability_zone       = data.aws_availability_zones.available.names[0]
   cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 3, 3)
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
   tags = {
     Name = "${var.vpc_name}-VPC-Subnet-NAT-01-${var.vpc_random_string}"
   }
@@ -68,7 +68,7 @@ resource "aws_subnet" "nat_subnet1" {
 resource "aws_subnet" "nat_subnet2" {
   availability_zone       = data.aws_availability_zones.available.names[1]
   cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 3, 4)
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
   tags = {
     Name = "${var.vpc_name}-VPC-Subnet-NAT-02-${var.vpc_random_string}"
   }
@@ -78,7 +78,7 @@ resource "aws_subnet" "nat_subnet2" {
 resource "aws_subnet" "nat_subnet3" {
   availability_zone       = data.aws_availability_zones.available.names[2]
   cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 3, 5)
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
   tags = {
     Name = "${var.vpc_name}-VPC-Subnet-NAT-03-${var.vpc_random_string}"
   }
@@ -88,7 +88,7 @@ resource "aws_subnet" "nat_subnet3" {
 resource "aws_subnet" "private_subnet1" {
   availability_zone       = data.aws_availability_zones.available.names[0]
   cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 4, 12)
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
   tags = {
     Name = "${var.vpc_name}-VPC-Subnet-Private-01-${var.vpc_random_string}"
   }
@@ -98,7 +98,7 @@ resource "aws_subnet" "private_subnet1" {
 resource "aws_subnet" "private_subnet2" {
   availability_zone       = data.aws_availability_zones.available.names[1]
   cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 4, 13)
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
   tags = {
     Name = "${var.vpc_name}-VPC-Subnet-Private-02-${var.vpc_random_string}"
   }
@@ -108,7 +108,7 @@ resource "aws_subnet" "private_subnet2" {
 resource "aws_subnet" "private_subnet3" {
   availability_zone       = data.aws_availability_zones.available.names[2]
   cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 4, 14)
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
   tags = {
     Name = "${var.vpc_name}-VPC-Subnet-Private-03-${var.vpc_random_string}"
   }

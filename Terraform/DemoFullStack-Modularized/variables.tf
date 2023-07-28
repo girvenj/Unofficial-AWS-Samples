@@ -290,13 +290,28 @@ variable "ssm_association_approve_after_days" {
   type        = number
 }
 
-variable "ssm_association_deployment_rate" {
-  description = "A rate expression that specifies when the association runs."
+variable "ssm_association_inventory_rate" {
+  description = "A rate expression that specifies when the inventory association runs."
   type        = string
 }
 
-variable "ssm_association_inventory_rate" {
-  description = "A rate expression that specifies when the inventory association runs."
+variable "ssm_association_driver_deployment_rate" {
+  description = "A rate expression that specifies when the driver check/update association runs."
+  type        = string
+}
+
+variable "ssm_association_launch_agent_deployment_rate" {
+  description = "A rate expression that specifies when the Launch Agent check/update association runs."
+  type        = string
+}
+
+variable "ssm_association_patching_deployment_rate" {
+  description = "A rate expression that specifies when the patching check/update association runs."
+  type        = string
+}
+
+variable "ssm_association_ssm_agent_deployment_rate" {
+  description = "A rate expression that specifies when the SSM agent check/update association runs."
   type        = string
 }
 

@@ -221,7 +221,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
         Description: Secret containing the random password of the onpremises Microsoft AD AD Connector account
         Type: String
       AMI:
-        #Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+        #Default: /aws/service/ami-windows-latest/TPM-Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
         Type: String
       EbsKmsKey:
@@ -443,10 +443,8 @@ resource "aws_ec2_tag" "xvdf" {
   value       = var.onprem_root_dc_server_netbios_name
 }
 
-/*
 resource "aws_ec2_tag" "main" {
   resource_id = aws_cloudformation_stack.instance_root_dc.outputs.OnpremDomainControllerInstanceID
   key         = "PatchGroup"
   value       = var.onprem_root_dc_patch_group_tag
 }
-*/

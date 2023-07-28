@@ -1,54 +1,44 @@
 AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  This template creates the following:
+    1.	(1) VPC w/ (2) public subnets in (2) AZs
+    2.	(1) Amazon EC2 Instance Role w/ profile
+    3.	(1) Domain Member SG
+    4.	(1) Domain Controller SG
+    5.	(1) Amazon EC2 Instances (t3.medium, 45Gb (C:) GP3)
+    6.	(1) Amazon EC2 Instances (t3.large, 45Gb (C:) GP3)
+    7.  (1) AWS Secrets Manager Secret containing the AD Administrator account password
+    8.  (2) AWS SSM Automation documents to configure the Amazon EC2 Instances
 Parameters:
   AMI:
-    Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+    Default: /aws/service/ami-windows-latest/TPM-Windows_Server-2022-English-Full-Base
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-  MADDomainName:
-    AllowedPattern: ^([a-zA-Z0-9]+[\\.-])+([a-zA-Z0-9])+$
-    Default: corp.example.com
-    Description: Fully qualified domain name (FQDN) of the AWS Managed Microsoft AD domain e.g. corp.example.com
-    MaxLength: '255'
-    MinLength: '2'
-    Type: String
-  MADNetBIOSName:
-    AllowedPattern: ^[^\\/:*?"<>|.]+[^\\/:*?"<>|]*$
-    Default: CORP
-    Description: NetBIOS name of the AWS Managed Microsoft AD domain (up to 15 characters) e.g. CORP
-    MaxLength: '15'
-    MinLength: '1'
-    Type: String
   OnpremDomainName:
     AllowedPattern: ^([a-zA-Z0-9]+[\\.-])+([a-zA-Z0-9])+$
-    Default: onprem.local
-    Description: Fully qualified domain name (FQDN) of the On-Premises domain e.g. onprem.local
-    MaxLength: '255'
-    MinLength: '2'
+    Default: corp.example.com
+    Description: Fully qualified domain name (FQDN) of the On-Premises domain e.g. corp.example.com
+    MaxLength: "255"
+    MinLength: "2"
     Type: String
   OnpremNetBIOSName:
     AllowedPattern: ^[^\\/:*?"<>|.]+[^\\/:*?"<>|]*$
-    Default: ONPREM
-    Description: NetBIOS name of the On-Premises domain (up to 15 characters) e.g. ONPREM
-    MaxLength: '15'
-    MinLength: '1'
-    Type: String 
+    Default: CORP
+    Description: NetBIOS name of the On-Premises domain (up to 15 characters) e.g. CORP
+    MaxLength: "15"
+    MinLength: "1"
+    Type: String
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Configuration
+          default: Parameters
         Parameters:
           - AMI
-          - MADDomainName
-          - MADNetBIOSName
           - OnpremDomainName
           - OnpremNetBIOSName
     ParameterLabels:
       AMI:
         default: SSM Parameter Value for Latest AMI ID
-      MADDomainName:
-        default: AWS Managed Microsft AD Domain DNS Name
-      MADNetBIOSName:
-        default: AWS Managed Microsft AD Domain NetBIOS Name
       OnpremDomainName:
         default: On-Premises Domain DNS Name
       OnpremNetBIOSName:
@@ -59,7 +49,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W60
-            reason: This is for an Immersion Day only, flow logs not needed
+            reason: This is for testing a blog post not production use
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/24
@@ -68,13 +58,13 @@ Resources:
       InstanceTenancy: default
       Tags:
         - Key: Name
-          Value: AD-ID-VPC
+          Value: RDS-Self-AD-VPC
   VPCPublicSubnet1Subnet:
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W33
-            reason: This is for an Immersion Day only, MapPublicIpOnLaunch is ok and may be needed to access instances
+            reason: This is by design to keep template simple and cost effective
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: !Select
@@ -89,14 +79,14 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: AD-ID-Subnet1
+          Value: RDS-Self-AD-Subnet1
       VpcId: !Ref VPC
   VPCPublicSubnet1RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       Tags:
         - Key: Name
-          Value: AD-ID-Subnet1
+          Value: RDS-Self-AD-Subnet1
       VpcId: !Ref VPC
   VPCPublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -119,7 +109,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W33
-            reason: This is for an Immersion Day only, MapPublicIpOnLaunch is ok and may be needed to access instances
+            reason: This is by design to keep template simple and cost effective
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: !Select
@@ -134,14 +124,14 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: AD-ID-Subnet2
+          Value: RDS-Self-AD-Subnet2
       VpcId: !Ref VPC
   VPCPublicSubnet2RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       Tags:
         - Key: Name
-          Value: AD-ID-Subnet2
+          Value: RDS-Self-AD-Subnet2
       VpcId: !Ref VPC
   VPCPublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -164,7 +154,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: AD-ID-VPC-IGW
+          Value: RDS-Self-AD-VPC-IGW
   VPCVPCGW:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
@@ -176,11 +166,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W11
-            reason: This is for an Immersion Day only, * resource on its permissions policy ok
+            reason: This is by design as they are read permissions only
           - id: W28
-            reason: This is for an Immersion Day only, explicit names are ok
+            reason: This is for testing a blog post not production use
           - id: W76
-            reason: This is for an Immersion Day only, SPCM for IAM policy document is higher than 25 ok
+            reason: This is for testing a blog post not production use
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -207,11 +197,7 @@ Resources:
                   - secretsmanager:DescribeSecret
                 Effect: Allow
                 Resource:
-                  - !Ref MadAdminSecret
                   - !Ref OnPremAdministratorSecret
-                  - !Ref OnPremAltAdminSecret
-                  - !Ref OnPremRestoreModeSecret
-                  - !Ref RdsAdminSecret
               - Action: ssm:SendCommand
                 Effect: Allow
                 Resource:
@@ -220,58 +206,24 @@ Resources:
               - Action: ssm:SendCommand
                 Condition:
                   StringEquals:
-                    ssm:ResourceTag/aws:cloudformation:stack-name:
-                      Ref: AWS::StackName
+                    "ssm:ResourceTag/aws:cloudformation:stack-name": !Ref AWS::StackName
                 Effect: Allow
                 Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+              - Action: ssm:StartAutomationExecution
+                Effect: Allow
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${MgmtInstanceSSMAuto}:$DEFAULT
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${OnPremDomainControllerSsmAuto}:$DEFAULT
               - Action:
-                  - ds:AddRegion
-                  - ds:CreateConditionalForwarder
-                  - ds:CreateLogSubscription
-                  - ds:CreateMicrosoftAD
-                  - ds:CreateTrust
-                  - ds:DeleteConditionalForwarder
-                  - ds:DeleteTrust
-                  - ds:Describe*
-                  - ds:Get*
-                  - ds:List*
-                  - ds:RegisterEventTopic
-                  - ds:RejectSharedDirectory
-                  - ds:RemoveRegion
-                  - ds:ShareDirectory
-                  - ds:UnshareDirectory
-                  - ds:UpdateConditionalForwarder
-                  - ds:UpdateTrust
-                  - ds:VerifyTrust
-                  - ec2:AuthorizeSecurityGroupEgress
-                  - ec2:AuthorizeSecurityGroupIngress
-                  - ec2:CreateNetworkInterface
-                  - ec2:CreateSecurityGroup
-                  - ec2:DeleteNetworkInterface
-                  - ec2:DeleteSecurityGroup
                   - ec2:DescribeInstances
-                  - ec2:DescribeNetworkInterfaces
-                  - ec2:DescribeSubnets
-                  - ec2:DescribeVpcs
-                  - ec2:RevokeSecurityGroupEgress
-                  - ec2:RevokeSecurityGroupIngress
-                  - ec2:DescribeSecurityGroups
-                  - logs:CreateLogGroup
-                  - logs:GetLogEvents
-                  - logs:PutResourcePolicy
-                  - sns:GetTopicAttributes
-                  - sns:ListSubscriptions
-                  - sns:ListSubscriptionsByTopic
-                  - sns:ListTopics
                   - ssm:DescribeInstanceInformation
+                  - ssm:GetAutomationExecution
                   - ssm:ListCommands
                   - ssm:ListCommandInvocations
-                  - ssm:StartAutomationExecution
-                  - sts:GetCallerIdentity
                 Effect: Allow
                 Resource: "*"
-          PolicyName: Inline-Policy
-      RoleName: AD-ID-InstanceRole
+          PolicyName: !Sub Inline-Policy-${AWS::StackName}
+      RoleName: !Sub RDS-Self-AD-InstanceRole-${AWS::StackName}
       Tags:
         - Key: StackName
           Value:
@@ -279,151 +231,45 @@ Resources:
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: AD-ID-InstanceRole
+      InstanceProfileName: !Sub RDS-Self-AD-InstanceRole-${AWS::StackName}
       Path: /
       Roles:
         - Ref: InstanceRole
-  RDSRole:
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W28
-            reason: This is for an Immersion Day only, explicit names are ok
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service:
-                - rds.amazonaws.com
-        Version: "2012-10-17"
-      ManagedPolicyArns:
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonRDSDirectoryServiceAccess
-      Path: /
-      RoleName: AD-ID-RDSRole
-      Tags:
-        - Key: StackName
-          Value:
-            Ref: AWS::StackName
-  MadAdminSecret:
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W77
-            reason: This is for an Immersion Day only, not using explicitly specify KmsKeyId ok
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      Name: MadAdminSecret
-      Description: Admin Password for AWS Managed Microsoft AD 
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "Admin"}'
-        GenerateStringKey: 'password'
-        PasswordLength: 30
-        ExcludeCharacters: '"@/\'
   OnPremAdministratorSecret:
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W77
-            reason: This is for an Immersion Day only, not using explicitly specify KmsKeyId ok
+            reason: This is for testing a blog post not production use, so it is uses the AWS provided keys
     Type: AWS::SecretsManager::Secret
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      Name: OnPremAdministratorSecret
+      Name: !Sub OnPremAdministratorSecret-${AWS::StackName}
       Description: Administrator Password for Onpremises AD
       GenerateSecretString:
         SecretStringTemplate: '{"username": "Administrator"}'
-        GenerateStringKey: 'password'
+        GenerateStringKey: "password"
         PasswordLength: 30
         ExcludeCharacters: '"@/\'
-  OnPremAltAdminSecret:
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W77
-            reason: This is for an Immersion Day only, not using explicitly specify KmsKeyId ok
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      Name: OnPremAltAdminSecret
-      Description: Alternate Admin Password for Onpremises AD
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "Admin"}'
-        GenerateStringKey: 'password'
-        PasswordLength: 30
-        ExcludeCharacters: '"@/\'
-  OnPremRestoreModeSecret:
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W77
-            reason: This is for an Immersion Day only, not using explicitly specify KmsKeyId ok
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      Name: OnPremRestoreModeSecret
-      Description: Restore Mode Password for Onpremises AD
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "Administrator"}'
-        GenerateStringKey: 'password'
-        PasswordLength: 30
-        ExcludeCharacters: '"@/\'
-  RdsAdminSecret:
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W77
-            reason: This is for an Immersion Day only, not using explicitly specify KmsKeyId ok
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      Name: RdsAdminSecret
-      Description: SQL Password for Amazon RDS 
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "admin"}'
-        GenerateStringKey: 'password'
-        PasswordLength: 30
-        ExcludeCharacters: '"@/\'
-  ManagedAD:
-    Type: AWS::DirectoryService::MicrosoftAD
-    Properties:
-      CreateAlias: false
-      Edition: Enterprise
-      EnableSso: false
-      Name: !Ref MADDomainName
-      Password: !Sub '{{resolve:secretsmanager:${MadAdminSecret}:SecretString:password}}'
-      ShortName: !Ref MADNetBIOSName
-      VpcSettings:
-        SubnetIds:
-          - !Ref VPCPublicSubnet1Subnet
-          - !Ref VPCPublicSubnet2Subnet
-        VpcId: !Ref VPC
   DomainMemberSG:
-    Type: AWS::EC2::SecurityGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W5
-            reason: This is for an Immersion Day only, open to world on egress ok
-          - id: W27
-            reason: This is for an Immersion Day only, ingress with port range instead of just a single port ok
+            reason: This is for testing a blog post not production use
+          - id: W9
+            reason: This is for testing a blog post not production use
           - id: W28
-            reason: This is for an Immersion Day only, explicit names are ok
+            reason: This is for testing a blog post not production use
           - id: W40
-            reason: This is for an Immersion Day only, egress with an IpProtocol of -1 ok
+            reason: This is for testing a blog post not production use
           - id: W42
-            reason: This is for an Immersion Day only, ingress with an ipProtocol of -1 ok
+            reason: This is for testing a blog post not production use and only allows inbound from within the VPC
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Domain Members Security Group
-      GroupName: AD-ID-Domain-Member-SG
+      GroupDescription: !Sub Domain-Members-SG-${AWS::StackName}
+      GroupName: !Sub Domain-Members-SG-${AWS::StackName}
       SecurityGroupEgress:
         - Description: All Outbound Traffic
           FromPort: -1
@@ -434,56 +280,38 @@ Resources:
         - Description: All Local VPC Traffic
           FromPort: -1
           IpProtocol: "-1"
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: -1
-        - Description: SSH Access
-          FromPort: 22
-          IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
-          ToPort: 22
-        - Description: PKI Access
-          FromPort: 135
-          IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
-          ToPort: 135
         - Description: RDP Access
           FromPort: 3389
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 3389
-        - Description: PKI Ephemeral Access
-          FromPort: 49152
-          IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
-          ToPort: 65535
       Tags:
         - Key: Name
-          Value: AD-ID-Domain-Member-SG
+          Value: !Sub Domain-Members-SG-${AWS::StackName}
       VpcId: !Ref VPC
   MgmtInstanceSSMAuto:
     Type: AWS::SSM::Document
     Properties:
       DocumentType: Automation
       Content:
-        schemaVersion: '0.3'
+        schemaVersion: "0.3"
         description: Deploy MGMT Instance with SSM Automation
         parameters:
-          MadAdminSecret:
-            description: AWS Secrets Parameter Name for the MAD Admin account.
+          AdminSecret:
+            description: AWS Secrets Parameter Name for the Administrator account.
             type: String
-          MadDomainDNSName:
+          DomainDNSName:
             description: Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.com
             type: String
-          MadDomainNetBIOSName:
+          DomainNetBIOSName:
             description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. CORP
             type: String
-          MadDcIP01:
+          DcIP01:
             description: IP of DNS server that can resolve domain (Must be accessible)
             type: String
-          MadDcIP02:
-            description: IP of DNS server that can resolve domain (Must be accessible)
-            type: String
-          MgmtServerNetBIOSName:
+          ServerNetBIOSName:
             description: NetBIOS name of the Management Instance server (up to 15 characters)
             type: String
           StackName:
@@ -501,11 +329,14 @@ Resources:
               Api: DescribeInstances
               Filters:
                 - Name: tag:Name
-                  Values: ['{{MgmtServerNetBIOSName}}']
+                  Values:
+                    - "{{ServerNetBIOSName}}"
                 - Name: tag:aws:cloudformation:stack-name
-                  Values: ['{{StackName}}']
+                  Values:
+                    - "{{StackName}}"
                 - Name: instance-state-name
-                  Values: ['running']
+                  Values:
+                    - "running"
             outputs:
               - Name: InstanceId
                 Selector: $.Reservations[0].Instances[0].InstanceId
@@ -516,7 +347,7 @@ Resources:
             inputs:
               DocumentName: AWS-RunPowerShellScript
               InstanceIds:
-                - '{{mgmtInstanceId.InstanceId}}'
+                - "{{mgmtInstanceId.InstanceId}}"
               Parameters:
                 commands: |-
                   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -535,10 +366,10 @@ Resources:
                           PropertyType = 'DWORD'
                       },
                       @{
-                          Name         = 'HideFirstRunExperience'
-                          Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge'
-                          Value        = '1'
-                          PropertyType = 'DWORD'
+                        Name         = 'HideFirstRunExperience'
+                        Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge'
+                        Value        = '1'
+                        PropertyType = 'DWORD'
                       }
                   )
 
@@ -561,26 +392,26 @@ Resources:
                   }
 
                   $Modules = @(
-                    @{
-                      Name = 'ActiveDirectoryDsc'
-                      Version = '6.2.0'
-                    },
-                    @{
-                        Name = 'ComputerManagementDsc'
-                        Version = '9.0.0'
-                    },
-                    @{
-                        Name = 'DnsServerDsc'
-                        Version = '3.0.0'
-                    },
-                    @{
-                        Name = 'NetworkingDsc'
-                        Version = '9.0.0'
-                    },
-                    @{
-                        Name = 'PSReadline'
-                        Version = '2.2.6'
-                    }
+                      @{
+                          Name = 'ActiveDirectoryDsc'
+                          Version = '6.2.0'
+                      },
+                      @{
+                          Name = 'ComputerManagementDsc'
+                          Version = '9.0.0'
+                      },
+                      @{
+                          Name = 'DnsServerDsc'
+                          Version = '3.0.0'
+                      },
+                      @{
+                          Name = 'NetworkingDsc'
+                          Version = '9.0.0'
+                      },
+                      @{
+                          Name = 'PSReadline'
+                          Version = '2.2.6'
+                      }
                   )
 
                   Write-Output 'Creating Temp Directory'
@@ -626,42 +457,16 @@ Resources:
                       Write-Output "Failed to install SQL Server Management Studio $_"
                       #Exit 1
                   }
-
-                  #Write-Output 'Installing SQL Server Express'
-                  #(New-Object -TypeName 'System.Net.WebClient').DownloadFile('https://go.microsoft.com/fwlink/?linkid=866658', 'C:\Temp\SQL2019-SSEI-Expr.exe')             
-                  #$ArgumentList = '/ACTION=Download', '/HIDEPROGRESSBAR', '/MEDIATYPE=Core', '/MEDIAPATH=C:\Temp', '/QUIET'
-                  #Try {
-                  #    $Process = Start-Process -FilePath 'C:\Temp\SQL2019-SSEI-Expr.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait -ErrorAction Stop
-                  #} Catch [System.Exception] {
-                  #    Write-Output "Failed to install SQL Server Express $_"
-                  #    #Exit 1
-                  #}
-
-                  #$ArgumentList = '/q', '/x:C:\Temp\SQLEXPR_2019'
-                  #Try {
-                  #    $Process = Start-Process -FilePath 'C:\Temp\SQLEXPR_x64_ENU.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait -ErrorAction Stop
-                  #} Catch [System.Exception] {
-                  #    Write-Output "Failed to install SQL extract Server Express media $_"
-                  #    #Exit 1
-                  #}
-
-                  #$ArgumentList = '/ACTION=Install', '/QUIET', '/FEATURES=SQL', '/INSTANCENAME=SQLEXPRESS', '/IACCEPTSQLSERVERLICENSETERMS', '/SQLSVCACCOUNT="NT AUTHORITY\NETWORK SERVICE"', '/SQLSYSADMINACCOUNTS="administrators"', '/SKIPRULES="RebootRequiredCheck"' 
-                  #Try {
-                  #    $Process = Start-Process -FilePath 'C:\Temp\SQLEXPR_2019\Setup.exe' -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait
-                  #} Catch [System.Exception] {
-                  #    Write-Output "Failed to install SQL extract Server Express media $_"
-                  #    #Exit 1
-                  #}
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
-                CloudWatchLogGroupName: !Sub /aws/AD-ID/${AWS::StackName}
+                CloudWatchLogGroupName: !Sub /aws/RDS-Self-AD/${AWS::StackName}
             nextStep: configureInstance
           - name: configureInstance
             action: aws:runCommand
             inputs:
               DocumentName: AWS-RunPowerShellScript
               InstanceIds:
-                - '{{mgmtInstanceId.InstanceId}}'
+                - "{{mgmtInstanceId.InstanceId}}"
               Parameters:
                 commands: |-
                   Function Get-SecretInfo {
@@ -803,10 +608,9 @@ Resources:
                       [CmdletBinding()]
                       param(
                           [Parameter(Mandatory = $true)][PSCredential]$DaCredentials,
-                          [Parameter(Mandatory = $true)][string]$MadDomainDNSName,
-                          [Parameter(Mandatory = $true)][string]$MadDomainNetBIOSName,
-                          [Parameter(Mandatory = $false)][string]$MadDcIP01,
-                          [Parameter(Mandatory = $false)][string]$MadDcIP02,
+                          [Parameter(Mandatory = $true)][string]$DomainDNSName,
+                          [Parameter(Mandatory = $true)][string]$DomainNetBIOSName,
+                          [Parameter(Mandatory = $true)][string]$DcIP01,
                           [Parameter(Mandatory = $true)][string]$GatewayAddress,
                           [Parameter(Mandatory = $true)][string]$InstanceIP,
                           [Parameter(Mandatory = $true)][string]$InstanceNetBIOSName,
@@ -828,10 +632,10 @@ Resources:
                           AllNodes = @(
                               @{
                                   NodeName             = '*'
-                                  #CertificateFile      = 'C:\Temp\publickeys\AWSQSDscPublicKey.cer'
-                                  #Thumbprint           = $DscCertThumbprint
+                                  CertificateFile      = 'C:\Temp\publickeys\AWSQSDscPublicKey.cer'
+                                  Thumbprint           = $DscCertThumbprint
                                   PSDscAllowDomainUser = $true
-                                  PsDscAllowPlainTextPassword = $true
+                                  PsDscAllowPlainTextPassword = $false
                               },
                               @{
                                   NodeName = 'localhost'
@@ -865,14 +669,14 @@ Resources:
                                   DependsOn      = '[IPAddress]SetIP'
                               }
                               DnsServerAddress DnsServerAddress {
-                                  Address        = $MadDcIP01, $MadDcIP02, '169.254.169.253'
+                                  Address        = $DcIP01, '169.254.169.253'
                                   InterfaceAlias = 'Primary'
                                   AddressFamily  = 'IPv4'
                                   DependsOn      = '[DefaultGatewayAddress]SetDefaultGateway'
                               }
                               DnsConnectionSuffix DnsConnectionSuffix {
                                   InterfaceAlias                 = 'Primary'
-                                  ConnectionSpecificSuffix       = $MadDomainDNSName
+                                  ConnectionSpecificSuffix       = $DomainDNSName
                                   RegisterThisConnectionsAddress = $True
                                   UseSuffixWhenRegistering       = $False
                                   DependsOn                      = '[DnsServerAddress]DnsServerAddress'
@@ -907,7 +711,7 @@ Resources:
                               }
                               Computer JoinDomain {
                                   Name       = $InstanceNetBIOSName
-                                  DomainName = $MadDomainDnsName
+                                  DomainName = $DomainDnsName
                                   Credential = $DaCredentials
                                   DependsOn  = '[WindowsFeature]GPMC'
                               }
@@ -917,11 +721,11 @@ Resources:
                       $Null = ConfigInstance -OutputPath 'C:\Temp\ConfigInstance' -ConfigurationData $ConfigurationData
                   }
 
-                  $AltSecret = Get-SecretInfo -Domain '{{MadDomainNetBIOSName}}' -SecretArn '{{MadAdminSecret}}'
+                  $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AdminSecret}}'
                   Invoke-PreConfig
                   Invoke-LcmConfig
                   $EniConfig = Get-EniConfig
-                  Set-DscConfiguration -DaCredentials $AltSecret.DomainCredentials -MadDomainDNSName '{{MadDomainDNSName}}' -MadDomainNetBIOSName '{{MadDomainNetBIOSName}}' -MadDcIP01 '{{MadDcIP01}}' -MadDcIP02 '{{MadDcIP02}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{MgmtServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
+                  Set-DscConfiguration -DaCredentials $Secret.DomainCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -DcIP01 '{{DcIP01}}'-GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ServerNetBIOSName}}' -MacAddress $EniConfig.MacAddress
             nextStep: runMgmtMof
           - name: runMgmtMof
             action: aws:runCommand
@@ -929,7 +733,7 @@ Resources:
             inputs:
               DocumentName: AWS-RunPowerShellScript
               InstanceIds:
-                - '{{mgmtInstanceId.InstanceId}}'
+                - "{{mgmtInstanceId.InstanceId}}"
               Parameters:
                 commands: |-
                   Function Invoke-DscStatusCheck {
@@ -945,151 +749,16 @@ Resources:
                   Invoke-DscStatusCheck
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
-                CloudWatchLogGroupName: !Sub /aws/AD-ID/${AWS::StackName}
+                CloudWatchLogGroupName: !Sub /aws/RDS-Self-AD/${AWS::StackName}
             nextStep: PostConfig
           - name: PostConfig
             action: aws:runCommand
             inputs:
               DocumentName: AWS-RunPowerShellScript
               InstanceIds:
-                - '{{mgmtInstanceId.InstanceId}}'
+                - "{{mgmtInstanceId.InstanceId}}"
               Parameters:
                 commands: |-
-                  Function Get-SecretInfo {
-                      [CmdletBinding()]
-                      Param (
-                          [Parameter(Mandatory = $True)][String]$Domain,
-                          [Parameter(Mandatory = $True)][String]$SecretArn
-                      )
-
-                      Write-Output "Getting $SecretArn Secret"
-                      Try {
-                          $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
-                      } Catch [System.Exception] {
-                          Write-Output "Failed to get $SecretArn Secret $_"
-                        #Exit 1
-                      }
-
-                      Write-Output 'Creating PSCredential object from Secret'
-                      $Username = $SecretContent.username
-                      $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
-                      $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
-                      $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
-
-                      $Output = [PSCustomObject][Ordered]@{
-                          'Credentials'       = $Credentials
-                          'DomainCredentials' = $DomainCredentials
-                          'Username'          = $Username
-                          'UserPassword'      = $UserPassword
-                      }
-
-                      Return $Output
-                  }
-
-                  Function Set-CredSSP {
-                      [CmdletBinding()]
-                      param(
-                          [Parameter(Mandatory = $true)][ValidateSet('Enable', 'Disable')][string]$Action
-                      )
-
-                      $RootKey = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows'
-                      $CredDelKey = 'CredentialsDelegation'
-                      $FreshCredKey = 'AllowFreshCredentials'
-                      $FreshCredKeyNTLM = 'AllowFreshCredentialsWhenNTLMOnly'
-
-                      Switch ($Action) {
-                          'Enable' {
-                              Write-Output 'Enabling CredSSP'
-                              $CredDelKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -ErrorAction SilentlyContinue
-                              If (-not $CredDelKeyPresent) {
-                                  Write-Output "Setting CredSSP registry entry $CredDelKey"
-                                  Try {
-                                      $CredDelPath = New-Item -Path "Registry::$RootKey" -Name $CredDelKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                                  } Catch [System.Exception] {
-                                      Write-Output "Failed to create CredSSP registry entry $CredDelKey $_"
-                                      Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
-                                      Exit 1
-                                  }
-                              } Else {
-                                  $CredDelPath = Join-Path -Path $RootKey -ChildPath $CredDelKey
-                              }
-
-                              $FreshCredKeyPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKey) -ErrorAction SilentlyContinue
-                              If (-not $FreshCredKeyPresent) {
-                                  Write-Output "Setting CredSSP registry entry $FreshCredKey"
-                                  Try {
-                                      $FreshCredKeyPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKey -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                                  } Catch [System.Exception] {
-                                      Write-Output "Failed to create CredSSP registry entry $FreshCredKey $_"
-                                      Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
-                                      Exit 1
-                                  }
-                              } Else {
-                                  $FreshCredKeyPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKey
-                              }
-
-                              $FreshCredKeyNTLMPresent = Test-Path -Path (Join-Path -Path "Registry::$CredDelPath" -ChildPath $FreshCredKeyNTLM) -ErrorAction SilentlyContinue
-                              If (-not $FreshCredKeyNTLMPresent) {
-                                  Write-Output "Setting CredSSP registry entry $FreshCredKeyNTLM"
-                                  Try {
-                                      $FreshCredKeyNTLMPath = New-Item -Path "Registry::$CredDelPath" -Name $FreshCredKeyNTLM -ErrorAction Stop | Select-Object -ExpandProperty 'Name'
-                                  } Catch [System.Exception] {
-                                      Write-Output "Failed to create CredSSP registry entry $FreshCredKeyNTLM $_"
-                                      Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
-                                      Exit 1
-                                  }
-                              } Else {
-                                  $FreshCredKeyNTLMPath = Join-Path -Path $CredDelPath -ChildPath $FreshCredKeyNTLM
-                              }
-
-                              Try {
-                                  $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentials' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
-                                  $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFresh' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
-                                  $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'AllowFreshCredentialsWhenNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
-                                  $Null = Set-ItemProperty -Path "Registry::$CredDelPath" -Name 'ConcatenateDefaults_AllowFreshNTLMOnly' -Value '1' -Type 'Dword' -Force -ErrorAction Stop
-                                  $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
-                                  $Null = Set-ItemProperty -Path "Registry::$FreshCredKeyNTLMPath" -Name '1' -Value 'WSMAN/*' -Type 'String' -Force -ErrorAction Stop
-                              } Catch [System.Exception] {
-                                  Write-Output "Failed to create CredSSP registry properties $_"
-                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse
-                                  Exit 1
-                              }
-
-                              Try {
-                                  $Null = Enable-WSManCredSSP -Role 'Client' -DelegateComputer '*' -Force -ErrorAction Stop
-                                  $Null = Enable-WSManCredSSP -Role 'Server' -Force -ErrorAction Stop
-                              } Catch [System.Exception] {
-                                  Write-Output "Failed to enable CredSSP $_"
-                                  $Null = Disable-WSManCredSSP -Role 'Client' -ErrorAction SilentlyContinue
-                                  $Null = Disable-WSManCredSSP -Role 'Server' -ErrorAction SilentlyContinue
-                                  Exit 1
-                              }
-                          }
-                          'Disable' {
-                              Write-Output 'Disabling CredSSP'
-                              Try {
-                                  Disable-WSManCredSSP -Role 'Client' -ErrorAction Continue
-                                  Disable-WSManCredSSP -Role 'Server' -ErrorAction Stop
-                              } Catch [System.Exception] {
-                                  Write-Output "Failed to disable CredSSP $_"
-                                  Exit 1
-                              }
-
-                              Write-Output 'Removing CredSSP registry entries'
-                              Try {
-                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
-                              } Catch [System.Exception] {
-                                  Write-Output "Failed to remove CredSSP registry entries $_"
-                                  Exit 1
-                              }
-                          }
-                          Default { 
-                              Write-Output 'InvalidArgument: Invalid value is passed for parameter Action'
-                              Exit 1
-                          }
-                      }
-                  }
-
                   Function Invoke-Cleanup {
                       [CmdletBinding()]
                       Param (
@@ -1133,160 +802,21 @@ Resources:
                       }
                   }
 
-                  Function Add-OuAcl {
-                      [CmdletBinding()]
-                      param(
-                          [Parameter(Mandatory = $true)][string]$AclPath,
-                          [Parameter(Mandatory = $true)][PSCredential]$Credential,
-                          [Parameter(Mandatory = $true)][Security.Principal.SecurityIdentifier]$IdentityReference,
-                          [Parameter(Mandatory = $true)][System.DirectoryServices.ActiveDirectoryRights]$ActiveDirectoryRights,
-                          [Parameter(Mandatory = $true)][System.Security.AccessControl.AccessControlType]$AccessControlType,
-                          [Parameter(Mandatory = $false)][Guid]$ObjectGuid,
-                          [Parameter(Mandatory = $false)][System.DirectoryServices.ActiveDirectorySecurityInheritance]$ActiveDirectorySecurityInheritance,
-                          [Parameter(Mandatory = $false)][Guid]$InheritedObjectGuid
-                      )
-                      Invoke-Command -Authentication 'Credssp' -ComputerName $env:COMPUTERNAME -Credential $Credential -ScriptBlock {
-                          Import-Module -Name 'ActiveDirectory' -Force
-
-                          [Security.Principal.SecurityIdentifier]$IdentityReference = $Using:IdentityReference | Select-Object -ExpandProperty 'Value'
-
-                          $ArgumentList = $IdentityReference, $Using:ActiveDirectoryRights, $Using:AccessControlType, $Using:ObjectGuid, $Using:ActiveDirectorySecurityInheritance, $Using:InheritedObjectGuid
-                          $ArgumentList = $ArgumentList.Where({ $_ -ne $Null })
-
-                          Write-Output 'Creating ACL object'
-                          Try {
-                              $Rule = New-Object -TypeName 'System.DirectoryServices.ActiveDirectoryAccessRule' -ArgumentList $ArgumentList -ErrorAction Stop
-                          } Catch [System.Exception] {
-                              Write-Output "Failed to create ACL object $_"
-                              Exit 1
-                          }
-
-                          Write-Output "Getting ACL for $Using:AclPath"
-                          Try {
-                              $ObjectAcl = Get-Acl -Path "AD:\$Using:AclPath" -ErrorAction Stop
-                              $ObjectAcl.AddAccessRule($Rule)
-                          } Catch [System.Exception] {
-                              Write-Output "Failed to get ACL for $AclPath $_"
-                              Exit 1
-                          }
-                          
-                          Write-Output "Setting ACL $ObjectAcl for $Using:AclPath"
-                          Try {
-                              Set-Acl -AclObject $ObjectAcl -Path "AD:\$Using:AclPath" -ErrorAction Stop
-                          } Catch [System.Exception] {
-                              Write-Output "Failed to set ACL for $Using:AclPath $_"
-                              Exit 1
-                          }
-                      }
-                  }
-
-                  $DomainCreds = (Get-SecretInfo -Domain '{{MadDomainNetBIOSName}}' -SecretArn '{{MadAdminSecret}}').DomainCredentials
-
-                  Write-Output 'Getting AD domain'
-                  Try {
-                      $Domain = Get-ADDomain -Credential $DomainCreds -ErrorAction Stop
-                  } Catch [System.Exception] {
-                      Write-Output "Failed to get AD domain $_"
-                      Exit 1
-                  }
-
-                  $BaseDn = $Domain | Select-Object -ExpandProperty 'DistinguishedName'
-                  $FQDN = $Domain | Select-Object -ExpandProperty 'DNSRoot'
-                  $Netbios = $Domain | Select-Object -ExpandProperty 'NetBIOSName'
-
-                  $UserPassword = (Get-SecretInfo -Domain '{{MadDomainNetBIOSName}}' -SecretArn '{{MadAdminSecret}}').UserPassword
-
-                  $User = @{
-                      AccountPassword        = $UserPassword
-                      Name                   = 'Joiner-Svc'
-                      DisplayName            = 'Joiner-Svc'
-                      SamAccountName         = 'Joiner-Svc'
-                      UserPrincipalName      = "Joiner-Svc@$FQDN"
-                      KerberosEncryptionType = 'AES128', 'AES256'
-                      PasswordNeverExpires   = $True
-                      Enabled                = $True
-                      Path                   = $("OU=Users,OU=$Netbios,$BaseDn")
-                      Credential             = $DomainCreds
-                  }
-
-                  Write-Output 'Creating Joiner-Svc'
-                  Try {
-                      New-ADUser @User -ErrorAction Stop
-                  } Catch [System.Exception] {
-                      Write-Output "Failed to create Joiner-Svc $_"
-                      Exit 1
-                  }
-
-                  Start-Sleep -Seconds 30
-
-                  Write-Output 'Getting RootDSE information'
-                  Try {
-                      $RootDse = Get-ADRootDSE -Credential $DomainCreds -ErrorAction Stop
-                  } Catch [System.Exception] {
-                      Write-Output "Failed to get RootDSE information $_"
-                      Exit 1
-                  }
-
-                  Write-Output 'Getting computer SchemaNamingContext'
-                  Try {
-                      [System.GUID]$ComputerNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'computer' } -Properties 'schemaIDGUID' -Credential $DomainCreds -ErrorAction Stop).schemaIDGUID
-                  } Catch [System.Exception] {
-                      Write-Output "Failed to get computer SchemaNamingContext $_"
-                      Exit 1
-                  }
-
-                  $NullGuid = [guid]'00000000-0000-0000-0000-000000000000'
-
-                  $AclRules = @(
-                      @{
-                          ActiveDirectoryRights              = 'CreateChild, DeleteChild'
-                          AccessControlType                  = 'Allow'
-                          ObjectGUID                         = $ComputerNameGuid
-                          ActiveDirectorySecurityInheritance = 'All'
-                          InheritedObjectGuid                = $NullGuid
-                          Credential                         = $DomainCreds
-                      },
-                      @{
-                          ActiveDirectoryRights              = 'GenericRead, GenericWrite, ListChildren, ReadControl'
-                          AccessControlType                  = 'Allow'
-                          ObjectGUID                         = $NullGuid
-                          ActiveDirectorySecurityInheritance = 'Descendents'
-                          InheritedObjectGuid                = $ComputerNameGuid
-                          Credential                         = $DomainCreds
-                      }                      
-                  )
-
-                  Write-Output 'Getting Joiner-Svc SID'
-                  Try {
-                      $IdentityReference = Get-ADUser -Identity 'Joiner-Svc' -Credential $DomainCreds -ErrorAction Stop | Select-Object -ExpandProperty 'SID'
-                  } Catch [System.Exception] {
-                      Write-Output "Failed to get Joiner-Svc SID $_"
-                      Exit 1
-                  }
-
-                  Set-CredSSP -Action 'Enable'
-
-                  Foreach ($AclRule in $AclRules) {
-                      Add-OuAcl -AclPath "OU=Computers,OU=$Netbios,$BaseDn" -Credential $AclRule.Credential -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.ActiveDirectoryRights -AccessControlType $AclRule.AccessControlType -ObjectGUID $AclRule.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.ActiveDirectorySecurityInheritance -InheritedObjectGuid $AclRule.InheritedObjectGuid
-                  }
-
-                  Set-CredSSP -Action 'Disable'
-
                   Invoke-Cleanup -VPCCIDR '{{VPCCIDR}}'
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
-                CloudWatchLogGroupName: !Sub /aws/AD-ID/${AWS::StackName}
+                CloudWatchLogGroupName: !Sub /aws/RDS-Self-AD/${AWS::StackName}
           - name: CFNSignalEnd
             action: aws:branch
             inputs:
               Choices:
                 - NextStep: signalsuccess
                   Not:
-                    Variable: '{{StackName}}'
-                    StringEquals: ''
+                    Variable: "{{StackName}}"
+                    StringEquals: ""
                 - NextStep: sleepend
-                  Variable: '{{StackName}}'
-                  StringEquals: ''
+                  Variable: "{{StackName}}"
+                  StringEquals: ""
           - name: signalsuccess
             action: aws:executeAwsApi
             isEnd: True
@@ -1294,9 +824,9 @@ Resources:
               Service: cloudformation
               Api: SignalResource
               LogicalResourceId: MgmtInstance
-              StackName: '{{StackName}}'
+              StackName: "{{StackName}}"
               Status: SUCCESS
-              UniqueId: '{{mgmtInstanceId.InstanceId}}'
+              UniqueId: "{{mgmtInstanceId.InstanceId}}"
           - name: sleepend
             action: aws:sleep
             isEnd: True
@@ -1308,9 +838,9 @@ Resources:
               Service: cloudformation
               Api: SignalResource
               LogicalResourceId: MgmtInstance
-              StackName: '{{StackName}}'
+              StackName: "{{StackName}}"
               Status: FAILURE
-              UniqueId: '{{mgmtInstanceId.InstanceId}}'
+              UniqueId: "{{mgmtInstanceId.InstanceId}}"
       Tags:
         - Key: StackName
           Value: !Ref AWS::StackName
@@ -1337,47 +867,47 @@ Resources:
       SubnetId: !Ref VPCPublicSubnet1Subnet
       Tags:
         - Key: Name
-          Value: MAD-MGMT01
+          Value: ONPREM-MGMT01
         - Key: Domain
-          Value: !Ref MADDomainName
+          Value: !Ref OnpremDomainName
       UserData:
         Fn::Base64:
           Fn::Sub:
             - |
               <powershell>
               $Params = @{
-                  MadAdminSecret           = '${MadAdminSecret}'
-                  MadDomainDNSName         = '${MADDomainName}'
-                  MadDomainNetBIOSName     = '${MADNetBIOSName}'
-                  MadDcIP01                = '${MadDcIP01}'
-                  MadDcIP02                = '${MadDcIP02}'
-                  MgmtServerNetBIOSName    = 'MAD-MGMT01'
-                  StackName                = '${AWS::StackName}'
-                  VPCCIDR                  = '${VPCCIDR}'
+                  AdminSecret          = '${OnPremAdministratorSecret}'
+                  DomainDNSName        = '${OnpremDomainName}'
+                  DomainNetBIOSName    = '${OnpremNetBIOSName}'
+                  DcIP01               = '${DcIP01}'
+                  ServerNetBIOSName    = 'ONPREM-MGMT01'
+                  StackName            = '${AWS::StackName}'
+                  VPCCIDR              = '${VPCCIDR}'
               }
               Start-SSMAutomationExecution -DocumentName '${MgmtInstanceSSMAuto}' -Parameter $Params
               </powershell>
-            - MadDcIP01: !Select [0, !GetAtt ManagedAD.DnsIpAddresses]
-              MadDcIP02: !Select [1, !GetAtt ManagedAD.DnsIpAddresses]
+            - DcIP01: !GetAtt OnPremDomainController.PrivateIp
               VPCCIDR: !GetAtt VPC.CidrBlock
   OnPremDomainControllerSG:
-    Type: AWS::EC2::SecurityGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W5
-            reason: This is for an Immersion Day only, open to world on egress ok
+            reason: This is for testing a blog post not production use
+          - id: W9
+            reason: This is for testing a blog post not production use
           - id: W27
-            reason: This is for an Immersion Day only, ingress with port range instead of just a single port ok
+            reason: This is for testing a blog post not production use
           - id: W28
-            reason: This is for an Immersion Day only, explicit names are ok
+            reason: This is for testing a blog post not production use
           - id: W40
-            reason: This is for an Immersion Day only, egress with an IpProtocol of -1 ok
+            reason: This is for testing a blog post not production use
           - id: W42
-            reason: This is for an Immersion Day only, ingress with an ipProtocol of -1 ok
+            reason: This is for testing a blog post not production use and only allows inbound from within the VPC
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Domain Controllers Security Group
-      GroupName: AD-ID-OnPrem-Domain-Controller-SG
+      GroupDescription: !Sub Domain-Controllers-SG-${AWS::StackName}
+      GroupName: !Sub Domain-Controllers-SG-${AWS::StackName}
       SecurityGroupEgress:
         - Description: All Outbound Traffic
           FromPort: -1
@@ -1388,111 +918,111 @@ Resources:
         - Description: DNS
           FromPort: 53
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 53
         - Description: DNS
           FromPort: 53
           IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 53
         - Description: Kerberos
           FromPort: 88
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 88
         - Description: Kerberos
           FromPort: 88
           IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 88
         - Description: Windows Time
           FromPort: 123
           IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 123
         - Description: RPC Port
           FromPort: 135
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 135
         - Description: Netlogon
           FromPort: 138
           IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 138
         - Description: LDAP
           FromPort: 389
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 389
         - Description: LDAP
           FromPort: 389
           IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 389
         - Description: SMB
           FromPort: 445
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 445
         - Description: SMB
           FromPort: 445
           IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 445
         - Description: Kerberos Set & Change Password
           FromPort: 464
           IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 464
         - Description: Kerberos Set & Change Password
           FromPort: 464
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 464
         - Description: LDAP over SSL
           FromPort: 636
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 636
         - Description: LDAP Global Catalog
           FromPort: 3268
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 3268
         - Description: LDAP Global Catalog over SSL
           FromPort: 3269
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 3269
         - Description: RDP Access
           FromPort: 3389
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 3389
         - Description: WinRM
           FromPort: 5985
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 5985
         - Description: SOAP ADWS
           FromPort: 9389
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 9389
         - Description: Random RPC
           FromPort: 49152
           IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 65535
         - Description: Random RPC
           FromPort: 49152
           IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
+          CidrIp: 10.0.0.0/24
           ToPort: 65535
       Tags:
         - Key: Name
-          Value: AD-ID-OnPrem-Domain-Controller-SG
+          Value: !Sub Domain-Controllers-SG-${AWS::StackName}
       VpcId: !Ref VPC
   OnPremDomainControllerSsmAuto:
     Type: AWS::SSM::Document
@@ -1504,9 +1034,6 @@ Resources:
           ADAdminSecParamName:
             description: AWS Secrets Parameter Name that has Password and Username for the built-in administrator
             type: String
-          ADAltUserSecParamName:
-            description: AWS Secrets Parameter Name for the account that will be added as Domain Administrator. This is separate from the built-in Administrator account
-            type: String
           ADServer1NetBIOSName:
             description: NetBIOS name of the first Active Directory Domain Controller (up to 15 characters)
             type: String
@@ -1515,9 +1042,6 @@ Resources:
             type: String
           DomainNetBIOSName:
             description: NetBIOS name of the domain (up to 15 characters) for users of earlier versions of Windows e.g. EXAMPLE
-            type: String
-          RestoreModeSecParamName:
-            description: AWS Secrets Parameter Name for the Active Directory Restore Mode Password
             type: String
           StackName:
             description: Stack Name Input for cfn resource signal
@@ -1654,7 +1178,7 @@ Resources:
                   }
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
-                CloudWatchLogGroupName: !Sub /aws/AD-ID/${AWS::StackName}
+                CloudWatchLogGroupName: !Sub /aws/RDS-Self-AD/${AWS::StackName}
             nextStep: configureInstance
           - name: configureInstance
             action: aws:runCommand
@@ -1802,8 +1326,6 @@ Resources:
                   Function Set-DscConfiguration {
                       [CmdletBinding()]
                       param(
-                          [Parameter(Mandatory = $true)][PSCredential]$AltAdminCredentials,
-                          [Parameter(Mandatory = $true)][String]$AltAdminUserName,
                           [Parameter(Mandatory = $true)][PSCredential]$DaCredentials,
                           [Parameter(Mandatory = $true)][string]$DomainDNSName,
                           [Parameter(Mandatory = $true)][string]$DomainNetBIOSName,
@@ -1959,44 +1481,6 @@ Resources:
                                   Site      = $SiteName
                                   DependsOn = '[ADReplicationSite]RegionSite'
                               }
-                              ADUser AlternateAdminUser {
-                                  Ensure                 = 'Present'
-                                  DomainName             = $DomainDnsName
-                                  UserName               = $AltAdminUserName
-                                  Password               = $AltAdminCredentials
-                                  DisplayName            = $AltAdminUserName
-                                  PasswordAuthentication = 'Negotiate'
-                                  UserPrincipalName      = "$AltAdminUserName@$DomainDnsName"
-                                  Credential             = $DaCredentials
-                                  DependsOn              = '[ADReplicationSite]RegionSite'
-                              }
-                              ADGroup AddAdminToDomainAdminsGroup {
-                                  Ensure           = 'Present'
-                                  GroupName        = 'Domain Admins'
-                                  GroupScope       = 'Global'
-                                  Category         = 'Security'
-                                  MembersToInclude = @($AltAdminUserName, 'Administrator')
-                                  Credential       = $DaCredentials
-                                  DependsOn        = '[ADUser]AlternateAdminUser'
-                              }
-                              ADGroup AddAdminToEnterpriseAdminsGroup {
-                                  Ensure           = 'Present'
-                                  GroupName        = 'Enterprise Admins'
-                                  GroupScope       = 'Universal'
-                                  Category         = 'Security'
-                                  MembersToInclude = @($AltAdminUserName, 'Administrator')
-                                  Credential       = $DaCredentials
-                                  DependsOn        = '[ADUser]AlternateAdminUser'
-                              }
-                              ADGroup AddAdminToSchemaAdminsGroup {
-                                  Ensure           = 'Present'
-                                  GroupName        = 'Schema Admins'
-                                  GroupScope       = 'Universal'
-                                  Category         = 'Security'
-                                  MembersToExclude = @($AltAdminUserName, 'Administrator')
-                                  Credential       = $DaCredentials
-                                  DependsOn        = '[ADUser]AlternateAdminUser'
-                              }
                               DnsServerForwarder ForwardtoVPCDNS {
                                   IsSingleInstance = 'Yes'
                                   IPAddresses      = $VPCDNS
@@ -2021,15 +1505,13 @@ Resources:
                   }
 
                   $DaSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAdminSecParamName}}'
-                  $RmSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{RestoreModeSecParamName}}'
-                  $AltSecret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{ADAltUserSecParamName}}'
                   Invoke-PreConfig
                   Invoke-LcmConfig
                   $EniConfig = Get-EniConfig
-                  Set-DscConfiguration -AltAdminCredentials $AltSecret.Credentials -AltAdminUserName $AltSecret.Username -DaCredentials $DaSecret.DomainCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ADServer1NetBIOSName}}' -LaCredentials $DaSecret.Credentials -MacAddress $EniConfig.MacAddress -RestoreModeCredentials $RmSecret.Credentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
+                  Set-DscConfiguration -DaCredentials $DaSecret.DomainCredentials -DomainDNSName '{{DomainDNSName}}' -DomainNetBIOSName '{{DomainNetBIOSName}}' -GatewayAddress $EniConfig.GatewayAddress -InstanceIP $EniConfig.IpAddress -InstanceNetBIOSName '{{ADServer1NetBIOSName}}' -LaCredentials $DaSecret.Credentials -MacAddress $EniConfig.MacAddress -RestoreModeCredentials $DaSecret.Credentials -SiteName '{{global:REGION}}' -VPCCIDR '{{VPCCIDR}}'
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
-                CloudWatchLogGroupName: !Sub /aws/AD-ID/${AWS::StackName}
+                CloudWatchLogGroupName: !Sub /aws/RDS-Self-AD/${AWS::StackName}
             nextStep: runDc1Mof
           - name: runDc1Mof
             action: aws:runCommand
@@ -2052,7 +1534,7 @@ Resources:
                   Invoke-DscStatusCheck
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
-                CloudWatchLogGroupName: !Sub /aws/AD-ID/${AWS::StackName}
+                CloudWatchLogGroupName: !Sub /aws/RDS-Self-AD/${AWS::StackName}
             nextStep: DnsConfig
           - name: DnsConfig
             action: aws:runCommand
@@ -2113,7 +1595,7 @@ Resources:
                               }
                           )
                       }
-                      
+
                       Configuration ConfigInstance {
                           Import-DscResource -ModuleName 'PSDesiredStateConfiguration', 'NetworkingDsc', 'ComputerManagementDsc', 'DnsServerDsc', 'ActiveDirectoryDsc'
                           Node LocalHost {
@@ -2233,7 +1715,7 @@ Resources:
                   Invoke-Cleanup -VPCCIDR '{{VPCCIDR}}'
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
-                CloudWatchLogGroupName: !Sub /aws/AD-ID/${AWS::StackName}
+                CloudWatchLogGroupName: !Sub /aws/RDS-Self-AD/${AWS::StackName}
           - name: CFNSignalEnd
             action: aws:branch
             inputs:
@@ -2276,7 +1758,6 @@ Resources:
             Ref: AWS::StackName
   OnPremDomainController:
     Type: AWS::EC2::Instance
-    DependsOn: ManagedAD
     CreationPolicy:
       ResourceSignal:
         Count: 1
@@ -2308,11 +1789,9 @@ Resources:
               <powershell>
               $Params = @{
                   ADAdminSecParamName     = '${OnPremAdministratorSecret}'
-                  ADAltUserSecParamName   = '${OnPremAltAdminSecret}'
                   ADServer1NetBIOSName    = 'ONPREM-DC01'
                   DomainDNSName           = '${OnpremDomainName}'
                   DomainNetBIOSName       = '${OnpremNetBIOSName}'
-                  RestoreModeSecParamName = '${OnPremRestoreModeSecret}'
                   StackName               = '${AWS::StackName}'
                   VPCCIDR                 = '${VPCCIDR}'
               }
@@ -2330,115 +1809,25 @@ Resources:
       SourceSecurityGroupId:
         Ref: OnPremDomainControllerSG
       ToPort: -1
-  RdsDBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: AD-ID-DBSubnetGroup
-      DBSubnetGroupName: AD-ID-DBSubnetGroup
-      SubnetIds:
-        - !Ref VPCPublicSubnet1Subnet
-        - !Ref VPCPublicSubnet2Subnet
-  RdsSG:
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W5
-            reason: This is for an Immersion Day only, open to world on egress ok
-          - id: W28
-            reason: This is for an Immersion Day only, explicit names are ok
-          - id: W40
-            reason: This is for an Immersion Day only, egress with an IpProtocol of -1 ok
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: RDS Security Group
-      GroupName: AD-ID-RDS-SG
-      SecurityGroupEgress:
-        - Description: All Outbound Traffic
-          FromPort: -1
-          IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-          ToPort: -1
-      SecurityGroupIngress:
-        - Description: SQL Access
-          FromPort: 1433
-          IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
-          ToPort: 1433
-      Tags:
-        - Key: Name
-          Value: AD-ID-RDS-SG
-      VpcId: !Ref VPC
-  RdsDB:
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: F24
-            reason: This is for an Immersion Day only, RDS instance master username is ok for plaintext
-          - id: F80
-            reason: This is for an Immersion Day only, deletion protection not needed
-          - id: W28
-            reason: This is for an Immersion Day only, explicit names are ok
-          - id: W75
-            reason: This is for an Immersion Day only, backup retention period greater than 0 not needed
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      AllocatedStorage: 20
-      AvailabilityZone: !Select
-        - 0
-        - Fn::GetAZs: !Ref AWS::Region
-      BackupRetentionPeriod: 0
-      DBInstanceClass: db.t3.xlarge
-      DBInstanceIdentifier: AD-ID
-      DBSubnetGroupName: !Ref RdsDBSubnetGroup
-      DeleteAutomatedBackups: true
-      Domain: !Ref ManagedAD
-      DomainIAMRoleName: !Ref RDSRole
-      Engine: sqlserver-se
-      EngineVersion: 15.00.4198.2.v1
-      KmsKeyId: alias/aws/rds
-      LicenseModel: license-included
-      MasterUsername: admin
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RdsAdminSecret}:SecretString:password}}'
-      MultiAZ: false
-      PubliclyAccessible: false
-      StorageEncrypted: true
-      StorageType: gp3
-      VPCSecurityGroups:
-        - !Ref RdsSG
-  R53SG:
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W5
-            reason: This is for an Immersion Day only, open to world on egress ok
-          - id: W28
-            reason: This is for an Immersion Day only, explicit names are ok
-          - id: W40
-            reason: This is for an Immersion Day only, egress with an IpProtocol of -1 ok
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Route 53 Resolver Security Group
-      GroupName: AD-ID-R53-Resolver-SG
-      SecurityGroupEgress:
-        - Description: All Outbound Traffic
-          FromPort: -1
-          IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-          ToPort: -1
-      SecurityGroupIngress:
-        - Description: DNS Access
-          FromPort: 53
-          IpProtocol: tcp
-          CidrIp: !GetAtt VPC.CidrBlock
-          ToPort: 53
-        - Description: DNS Access
-          FromPort: 53
-          IpProtocol: udp
-          CidrIp: !GetAtt VPC.CidrBlock
-          ToPort: 53
-      Tags:
-        - Key: Name
-          Value: AD-ID-R53-Resolver-SG
-      VpcId: !Ref VPC
+Outputs:
+  OnPremAdministratorSecretArn:
+    Description: Administrator Account Secret ARN
+    Value: !Ref OnPremAdministratorSecret
+  DomainControllerInstanceID:
+    Description: Domain Controller Instance ID
+    Value: !Ref OnPremDomainController
+  DomainControllerInstancePrivateIP:
+    Description: Domain Controller Instance Private IP
+    Value: !GetAtt OnPremDomainController.PrivateIp
+  ManagementInstanceID:
+    Description: Management Instance ID
+    Value: !Ref MgmtInstance
+  ManagementInstancePrivateIP:
+    Description: Management Instance Private IP
+    Value: !GetAtt MgmtInstance.PrivateIp
+  DomainMemberSGID:
+    Description: Domain Member Security Group ID
+    Value: !Ref DomainMemberSG
+  DomainControllerSGID:
+    Description: Domain Controller Security Group ID
+    Value: !Ref OnPremDomainControllerSG
