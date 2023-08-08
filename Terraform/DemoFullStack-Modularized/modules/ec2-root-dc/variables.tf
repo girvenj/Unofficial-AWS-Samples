@@ -3,6 +3,11 @@ variable "mad_admin_secret" {
   type        = string
 }
 
+variable "mad_directory_id" {
+  description = "Directory ID of the AWS Managed Microsoft AD domain."
+  type        = string
+}
+
 variable "mad_domain_fqdn" {
   description = "The fully qualified name for the AWS Managed Microsoft AD domain, such as corp.example.com"
   type        = string

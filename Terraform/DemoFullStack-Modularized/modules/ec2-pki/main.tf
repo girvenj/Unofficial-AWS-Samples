@@ -1,9 +1,9 @@
 terraform {
-  required_version = ">= 0.12.0"
+  required_version = ">= 1.5.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 4.0"
+      version = "~> 5.0"
     }
   }
 }
@@ -59,7 +59,8 @@ data "aws_iam_policy_document" "ec2" {
     resources = [
       "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_pki_ssm_docs[0]}:$DEFAULT",
       "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_pki_ssm_docs[1]}:$DEFAULT",
-      "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_pki_ssm_docs[2]}:$DEFAULT"
+      "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_pki_ssm_docs[2]}:$DEFAULT",
+      "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_pki_ssm_docs[3]}:$DEFAULT"
     ]
   }
   statement {

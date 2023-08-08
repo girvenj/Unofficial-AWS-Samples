@@ -8,6 +8,7 @@ variable "kms_customer_master_key_spec" {
 }
 
 variable "kms_enable_key_rotation" {
+  default = true
   description = "Specifies whether key rotation is enabled."
   type        = bool
 }
@@ -37,6 +38,12 @@ variable "kms_key_usage" {
     condition     = contains(["ENCRYPT_DECRYPT", "SIGN_VERIFY", "GENERATE_VERIFY_MAC"], var.kms_key_usage)
     error_message = "The key usage value must be ENCRYPT_DECRYPT, SIGN_VERIFY, or GENERATE_VERIFY_MAC."
   }
+}
+
+variable "kms_multi_region" {
+  default = false
+  description = "Indicates whether the KMS key is a multi-Region ."
+  type        = bool
 }
 
 variable "kms_random_string" {

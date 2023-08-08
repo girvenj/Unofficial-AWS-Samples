@@ -1,9 +1,9 @@
 terraform {
-  required_version = ">= 0.12.0"
+  required_version = ">= 1.5.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 4.0"
+      version = "~> 5.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -64,7 +64,9 @@ data "aws_iam_policy_document" "ec2" {
     resources = [
       "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_root_dc_ssm_docs[0]}:$DEFAULT",
       "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_root_dc_ssm_docs[1]}:$DEFAULT",
-      "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_root_dc_ssm_docs[2]}:$DEFAULT"
+      "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_root_dc_ssm_docs[2]}:$DEFAULT",
+      "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:automation-definition/${var.onprem_root_dc_ssm_docs[3]}:$DEFAULT"
+
     ]
   }
   statement {
@@ -204,6 +206,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
     LaunchTemplate            = var.onprem_root_dc_ec2_launch_template
     MadAdminSecret            = var.mad_admin_secret
     MadDomainName             = var.mad_domain_fqdn
+    MadDirectoryId            = var.mad_directory_id
     OnPremAdministratorSecret = module.store_secret_administrator.secret_id
     OnpremDomainName          = var.onprem_root_dc_domain_fqdn
     OnpremNetBiosName         = var.onprem_root_dc_domain_netbios
@@ -259,6 +262,9 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
         Type: String
       MadAdminSecret:
         Description: Secret containing the random password of the AWS Managed Microsoft AD Admin account
+        Type: String
+      MadDirectoryId:
+        Description: Directory ID of the AWS Managed Microsoft AD
         Type: String
       MadDomainName:
         AllowedPattern: ^([a-zA-Z0-9]+(-[a-zA-Z0-9]+)*\.)+[a-zA-Z]{2,}$
@@ -360,6 +366,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
                       IntegrateAdConnector = '$${IntegrateAdConnector}'
                       IntegrateFsxOnprem = '$${IntegrateFsxOnprem}'
                       LogicalResourceId = 'OnPremDomainController'
+                      MadDirectoryID = '$${MadDirectoryID}'
                       MadDNSName = '$${MadDNSName}'
                       AdministratorSecretName = '$${AdministratorSecretName}'
                       ServerNetBIOSName = '$${ServerNetBIOSName}'
@@ -379,6 +386,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
                 FsxOnpremSvcSecret: !Ref FsxOnpremSvcSecret
                 IntegrateAdConnector: !Ref IntegrateAdConnector
                 IntegrateFsxOnprem: !Ref IntegrateFsxOnprem
+                MadDirectoryID: !Ref MadDirectoryId
                 MadDNSName: !Ref MadDomainName
                 ServerNetBIOSName: !Ref ServerNetBIOSName
                 TrustDirection: !Ref TrustDirection

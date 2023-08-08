@@ -422,6 +422,7 @@ module "kms_ebs_key" {
   kms_key_deletion_window_in_days = 7
   kms_enable_key_rotation         = true
   kms_key_alias_name              = var.ebs_kms_key
+  kms_multi_region                = false
   kms_random_string               = random_string.random_string.result
 }
 
@@ -434,6 +435,7 @@ module "kms_ebs_key" {
   kms_key_deletion_window_in_days = 7
   kms_enable_key_rotation         = true
   kms_key_alias_name              = var.rds_kms_key
+  kms_multi_region                = false
   kms_random_string               = random_string.random_string.result
 }
 
@@ -446,6 +448,7 @@ module "kms_fsx_key" {
   kms_key_deletion_window_in_days = 7
   kms_enable_key_rotation         = true
   kms_key_alias_name              = var.fsx_kms_key
+  kms_multi_region                = false
   kms_random_string               = random_string.random_string.result
 }*/
 
@@ -468,13 +471,15 @@ module "kms_secret_key" {
   kms_key_deletion_window_in_days = 7
   kms_enable_key_rotation         = true
   kms_key_alias_name              = var.secret_kms_key
+  kms_multi_region                = false
   kms_random_string               = random_string.random_string.result
 }
 
 module "onprem_root_dc_instance" {
   source                                  = "./modules/ec2-root-dc"
-  mad_domain_fqdn                         = module.managed_ad.managed_ad_domain_name
   mad_admin_secret                        = module.managed_ad.managed_ad_password_secret_id
+  mad_domain_fqdn                         = module.managed_ad.managed_ad_domain_name
+  mad_directory_id                   = module.managed_ad.managed_ad_id
   mad_trust_direction                     = var.mad_trust_direction
   onprem_root_dc_adc_svc_username         = var.onprem_root_dc_adc_svc_username
   onprem_root_dc_deploy_adc               = var.onprem_root_dc_deploy_adc
@@ -494,7 +499,7 @@ module "onprem_root_dc_instance" {
   onprem_root_dc_secret_kms_key           = var.use_customer_managed_keys ? module.kms_secret_key[0].kms_alias_name : "alias/aws/secretsmanager"
   onprem_root_dc_security_group_id        = module.ad_security_group_primary.sg_id
   onprem_root_dc_server_netbios_name      = var.onprem_root_dc_server_netbios_name
-  onprem_root_dc_ssm_docs                 = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
+  onprem_root_dc_ssm_docs                 = [module.ssm_docs.ssm_initial_doc_name, module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
   onprem_root_dc_subnet_id                = module.network.nat_subnet1_id
   onprem_root_dc_use_customer_managed_key = var.use_customer_managed_keys
   onprem_root_dc_vpc_cidr                 = module.network.vpc_cidr
@@ -518,7 +523,6 @@ module "mad_mgmt_instance" {
   mad_mgmt_admin_secret             = module.managed_ad.managed_ad_password_secret_id
   mad_mgmt_admin_secret_kms_key     = var.use_customer_managed_keys ? module.kms_secret_key[0].kms_alias_name : "alias/aws/secretsmanager"
   mad_mgmt_deploy_pki               = false
-  mad_mgmt_directory_id             = module.managed_ad.managed_ad_id
   mad_mgmt_domain_fqdn              = module.managed_ad.managed_ad_domain_name
   mad_mgmt_domain_netbios           = module.managed_ad.managed_ad_netbios_name
   mad_mgmt_ec2_ami_name             = var.ec2_ami_name
@@ -530,7 +534,7 @@ module "mad_mgmt_instance" {
   mad_mgmt_random_string            = random_string.random_string.result
   mad_mgmt_security_group_id        = module.ms_security_group_primary.sg_id
   mad_mgmt_server_netbios_name      = var.mad_mgmt_server_netbios_name
-  mad_mgmt_ssm_docs                 = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
+  mad_mgmt_ssm_docs                 = [module.ssm_docs.ssm_initial_doc_name, module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
   mad_mgmt_subnet_id                = module.network.nat_subnet1_id
   mad_mgmt_use_customer_managed_key = var.use_customer_managed_keys
   mad_mgmt_vpc_cidr                 = module.network.vpc_cidr
@@ -579,7 +583,7 @@ module "onprem_pki_instance" {
   onprem_pki_random_string            = random_string.random_string.result
   onprem_pki_security_group_id        = module.pki_security_group_primary.sg_id
   onprem_pki_server_netbios_name      = var.onprem_root_pki_server_netbios_name
-  onprem_pki_ssm_docs                 = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
+  onprem_pki_ssm_docs                 = [module.ssm_docs.ssm_initial_doc_name, module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
   onprem_pki_subnet_id                = module.network.nat_subnet1_id
   onprem_pki_use_customer_managed_key = var.use_customer_managed_keys
   onprem_pki_vpc_cidr                 = module.network.vpc_cidr
@@ -603,7 +607,7 @@ module "onprem_pki_instance" {
   onprem_child_dc_random_string            = random_string.random_string.result
   onprem_child_dc_security_group_id        = module.ad_security_group_primary.sg_id
   onprem_child_dc_server_netbios_name      = var.onprem_child_dc_server_netbios_name
-  onprem_child_dc_ssm_docs                 = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
+  onprem_child_dc_ssm_docs                 = [module.ssm_docs.ssm_initial_doc_name, module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
   onprem_child_dc_subnet_id                = module.network.nat_subnet1_id
   onprem_child_dc_vpc_cidr                 = module.network.vpc_cidr
   onprem_child_dc_use_customer_managed_key = var.use_customer_managed_keys
@@ -639,7 +643,7 @@ module "onprem_additional_root_dc_instance" {
   onprem_additional_dc_random_string            = random_string.random_string.result
   onprem_additional_dc_security_group_id        = module.ad_security_group_primary.sg_id
   onprem_additional_dc_server_netbios_name      = var.onprem_root_additional_dc_server_netbios_name
-  onprem_additional_dc_ssm_docs                 = [module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
+  onprem_additional_dc_ssm_docs                 = [module.ssm_docs.ssm_initial_doc_name, module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
   onprem_additional_dc_subnet_id                = module.network.nat_subnet1_id
   onprem_additional_dc_use_customer_managed_key = var.use_customer_managed_keys
   onprem_additional_dc_vpc_cidr                 = module.network.vpc_cidr

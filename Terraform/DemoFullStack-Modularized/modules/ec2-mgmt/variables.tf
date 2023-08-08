@@ -13,11 +13,6 @@ variable "mad_mgmt_deploy_pki" {
   type        = bool
 }
 
-variable "mad_mgmt_directory_id" {
-  description = "Directory ID of the AWS Managed Microsoft AD domain."
-  type        = string
-}
-
 variable "mad_mgmt_domain_fqdn" {
   description = "The fully qualified name for the domain, such as corp.example.com."
   type        = string
