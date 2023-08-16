@@ -283,9 +283,9 @@ module "managed_ad" {
   mad_secret_kms_key                       = var.use_customer_managed_keys ? module.kms_secret_key[0].kms_alias_name : "alias/aws/secretsmanager"
   mad_subnet_ids                           = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
   mad_vpc_id                               = module.network.vpc_id
-  #depends_on = [
-  #  module.kms_secret_key
-  #]
+  depends_on = [
+    module.kms_secret_key
+  ]
 }
 
 module "connect_ad" {
@@ -300,7 +300,7 @@ module "connect_ad" {
   cad_vpc_id              = module.network.vpc_id
 }
 
-/*module "managed_ad_new_region" {
+module "managed_ad_new_region" {
   providers = {
     aws.primary   = aws.primary
     aws.secondary = aws.secondary
@@ -316,7 +316,7 @@ module "connect_ad" {
   depends_on = [
     module.onprem_root_dc_instance
   ]
-}*/
+}
 
 module "r53_outbound_resolver_rule_mad" {
   source                            = "./modules/r53-outbound-resolver-rule"
@@ -328,7 +328,7 @@ module "r53_outbound_resolver_rule_mad" {
   r53_rule_vpc_id                   = module.network.vpc_id
 }
 
-/*module "fsx_mad" {
+module "fsx_mad" {
   source                                  = "./modules/fsx-mad"
   fsx_mad_alias                           = var.fsx_mad_alias
   fsx_mad_automatic_backup_retention_days = var.fsx_mad_automatic_backup_retention_days
@@ -362,11 +362,11 @@ module "rds_mad" {
   rds_subnet_ids        = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
   rds_username          = var.rds_username
   rds_vpc_id            = module.network.vpc_id
-  #depends_on = [
-  #  module.kms_secret_key,
-  #  module.kms_rds_key
-  #]
-}*/
+   depends_on = [
+     module.kms_secret_key,
+     module.kms_rds_key
+   ]
+}
 
 module "ssm_docs" {
   source                 = "./modules/ssm-docs"
@@ -437,7 +437,7 @@ module "kms_ebs_key" {
   kms_random_string               = random_string.random_string.result
 }
 
-/*module "kms_rds_key" {
+module "kms_rds_key" {
   count                           = var.use_customer_managed_keys ? 1 : 0
   source                          = "./modules/kms"
   kms_key_description             = "KMS key for RDS encryption"
@@ -461,7 +461,7 @@ module "kms_fsx_key" {
   kms_key_alias_name              = var.fsx_kms_key
   kms_multi_region                = false
   kms_random_string               = random_string.random_string.result
-}*/
+}
 
 resource "aws_launch_template" "main" {
   name = "Metadata-Config-Launch-Template-${random_string.random_string.result}"
@@ -549,7 +549,7 @@ module "mad_mgmt_instance" {
   mad_mgmt_vpc_cidr                 = module.network.vpc_cidr
 }
 
-/*module "fsx_onpremises" {
+module "fsx_onpremises" {
   source                                    = "./modules/fsx-self-managed"
   fsx_self_alias                            = var.fsx_self_alias
   fsx_self_automatic_backup_retention_days  = var.fsx_self_automatic_backup_retention_days
@@ -568,8 +568,8 @@ module "mad_mgmt_instance" {
   fsx_self_username                         = var.onprem_root_dc_fsx_svc_username
   fsx_self_vpc_id                           = module.network.vpc_id
   depends_on = [
-    module.r53_outbound_resolver_rule_onprem_root#,
-    #module.kms_fsx_key
+    module.r53_outbound_resolver_rule_onprem_root,
+    module.kms_fsx_key
   ]
 }
 
@@ -685,7 +685,7 @@ resource "aws_ssm_association" "fsx_onpremises_alias" {
     key    = "InstanceIds"
     values = [module.onprem_root_dc_instance.onprem_ad_instance_id]
   }
-}*/
+}
 
 module "ssm_updates_software_secondary" {
   source                                       = "./modules/ssm-associations"
@@ -742,60 +742,3 @@ resource "aws_ssm_service_setting" "default_role" {
   setting_id    = "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:servicesetting/ssm/managed-instance/default-ec2-instance-management-role"
   setting_value = "service-role/${aws_iam_role.amazon_ssm_managed_ec2_instance_default_role.name}"
 }
-
-/*resource "aws_acmpca_certificate_authority" "root" {
-  type = "ROOT"
-
-  certificate_authority_configuration {
-    key_algorithm     = var.acmpca_key_algorithm
-    signing_algorithm = var.acmpca_signing_algorithm 
-    subject {
-      common_name = "example.com"
-    }
-  }
-}
-
-resource "aws_acmpca_certificate" "root" {
-  certificate_authority_arn   = aws_acmpca_certificate_authority.root.arn
-  certificate_signing_request = aws_acmpca_certificate_authority.root.certificate_signing_request
-  signing_algorithm           = var.acmpca_signing_algorithm 
-  template_arn                = "arn:${data.aws_partition.main.partition}:acm-pca:::template/RootCACertificate/V1"
-  validity {
-    type  = "YEARS"
-    value = var.acmpca_certificate_validity_period
-  }
-}
-
-resource "aws_acmpca_certificate_authority_certificate" "root" {
-  certificate_authority_arn = aws_acmpca_certificate_authority.root.arn
-  certificate               = aws_acmpca_certificate.root.certificate
-  certificate_chain         = aws_acmpca_certificate.root.certificate_chain
-}
-
-resource "aws_acmpca_certificate_authority" "subordinate" {
-  type = "SUBORDINATE"
-  certificate_authority_configuration {
-    key_algorithm     = var.acmpca_key_algorithm
-    signing_algorithm = var.acmpca_signing_algorithm 
-    subject {
-      common_name = "sub.example.com"
-    }
-  }
-}
-
-resource "aws_acmpca_certificate" "subordinate" {
-  certificate_authority_arn   = aws_acmpca_certificate_authority.root.arn
-  certificate_signing_request = aws_acmpca_certificate_authority.subordinate.certificate_signing_request
-  signing_algorithm           = var.acmpca_signing_algorithm 
-  template_arn = "arn:${data.aws_partition.current.partition}:acm-pca:::template/SubordinateCACertificate_PathLen0/V1"
-  validity {
-    type  = "YEARS"
-    value = var.acmpca_certificate_validity_period
-  }
-}
-
-resource "aws_acmpca_certificate_authority_certificate" "subordinate" {
-  certificate_authority_arn = aws_acmpca_certificate_authority.subordinate.arn
-  certificate       = aws_acmpca_certificate.subordinate.certificate
-  certificate_chain = aws_acmpca_certificate.subordinate.certificate_chain
-}*/
