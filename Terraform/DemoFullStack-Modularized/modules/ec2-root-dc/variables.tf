@@ -73,16 +73,6 @@ variable "onprem_root_dc_ec2_launch_template" {
   type        = string
 }
 
-variable "onprem_root_dc_fsx_administrators_group" {
-  description = "The name of the domain group whose members are granted administrative privileges for the file system."
-  type        = string
-}
-
-variable "onprem_root_dc_fsx_ou" {
-  description = "FSx integrated with onpremises AD parent OU."
-  type        = string
-}
-
 variable "onprem_root_dc_fsx_svc_username" {
   default = "FSx_Svc"
   description = "The user name for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain."

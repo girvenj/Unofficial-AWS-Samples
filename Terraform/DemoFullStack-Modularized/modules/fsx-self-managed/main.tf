@@ -41,8 +41,8 @@ locals {
 
 module "fsx_security_group" {
   source      = "../vpc-security-group-ingress"
-  name        = "${var.fsx_self_alias}-FSx-Security-Group-${var.fsx_self_random_string}"
-  description = "${var.fsx_self_alias} FSx Security Group"
+  name        = "${var.fsx_self_alias}-FSx-Onprem-${var.fsx_self_domain_fqdn}-Security-Group-${var.fsx_self_random_string}"
+  description = "${var.fsx_self_alias} FSx Onprem ${var.fsx_self_domain_fqdn} Security Group"
   vpc_id      = var.fsx_self_vpc_id
   ports       = local.fsx_ports
 }
@@ -60,7 +60,7 @@ resource "aws_fsx_windows_file_system" "main" {
   subnet_ids                      = var.fsx_self_subnet_ids
   throughput_capacity             = var.fsx_self_throughput_capacity
   tags = {
-    Name = "${var.fsx_self_alias}-${var.fsx_self_random_string}"
+    Name = "${var.fsx_self_alias}-FSx-Onprem-${var.fsx_self_domain_fqdn}-${var.fsx_self_random_string}"
   }
   self_managed_active_directory {
     dns_ips                                = var.fsx_self_dns_ips
@@ -72,9 +72,9 @@ resource "aws_fsx_windows_file_system" "main" {
   }
 }
 
-resource "aws_ec2_tag" "eni" {
-  for_each    = aws_fsx_windows_file_system.main.network_interface_ids
-  resource_id = each.value
-  key         = "Name"
-  value       = "${var.fsx_self_alias}-${var.fsx_self_random_string}"
-}
+#resource "aws_ec2_tag" "eni" {
+#  for_each    = aws_fsx_windows_file_system.main.network_interface_ids
+#  resource_id = each.value
+#  key         = "Name"
+#  value       = "${var.fsx_self_alias}-FSx-Onprem-${var.fsx_self_domain_fqdn}-${var.fsx_self_random_string}"
+#}

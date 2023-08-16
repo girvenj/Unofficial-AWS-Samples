@@ -16,9 +16,18 @@ data "aws_caller_identity" "main" {}
 
 locals {
   aws_ssm_association_drivers = [
-    "AwsEnaNetworkDriver",
-    "AWSNVMe",
-    "AWSPVDriver"
+    {
+      friendly_name = "AWS-ENA-Driver"
+      name          = "AwsEnaNetworkDriver"
+    },
+    {
+      friendly_name = "AWS-NVMe-Driver"
+      name          = "AWSNVMe"
+    },
+    {
+      friendly_name = "AWS-PV-Driver"
+      name          = "AWSPVDriver"
+    }
   ]
 
   aws_ssm_patchbaselinelinux = [
@@ -255,10 +264,10 @@ resource "aws_ssm_patch_group" "windows" {
 }
 
 resource "aws_ssm_association" "drivers" {
+  for_each                    = { for dr in local.aws_ssm_association_drivers : dr.friendly_name => dr }
   apply_only_at_cron_interval = true
-  association_name            = "${each.value}-DailyCheck-${var.ssm_association_random_string}"
+  association_name            = "${each.key}-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity         = "HIGH"
-  for_each                    = toset(local.aws_ssm_association_drivers)
   max_concurrency             = var.ssm_association_max_concurrency
   max_errors                  = var.ssm_association_max_errors
   name                        = "AWS-ConfigureAWSPackage"
@@ -266,7 +275,7 @@ resource "aws_ssm_association" "drivers" {
     action              = "Install"
     additionalArguments = "{}"
     installationType    = "Uninstall and reinstall"
-    name                = each.value
+    name                = each.value.name
     version             = ""
   }
   schedule_expression = var.ssm_association_driver_deployment_rate
@@ -278,7 +287,7 @@ resource "aws_ssm_association" "drivers" {
 
 resource "aws_ssm_association" "launch-agent" {
   apply_only_at_cron_interval = false
-  association_name            = "AWSEC2Launch-Agent-DailyCheck-${var.ssm_association_random_string}"
+  association_name            = "AWS-EC2Launch-Agent-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity         = "HIGH"
   max_concurrency             = var.ssm_association_max_concurrency
   max_errors                  = var.ssm_association_max_errors
@@ -299,7 +308,7 @@ resource "aws_ssm_association" "launch-agent" {
 
 resource "aws_ssm_association" "ssm-agent" {
   apply_only_at_cron_interval = false
-  association_name            = "UpdateSSMAgent-Agent-DailyCheck-${var.ssm_association_random_string}"
+  association_name            = "AWS-SSMAgent-Agent-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity         = "HIGH"
   max_concurrency             = var.ssm_association_max_concurrency
   max_errors                  = var.ssm_association_max_errors
@@ -313,7 +322,7 @@ resource "aws_ssm_association" "ssm-agent" {
 
 resource "aws_ssm_association" "software-inventory" {
   apply_only_at_cron_interval = false
-  association_name            = "GatherSoftwareInventory-Agent-DailyCheck-${var.ssm_association_random_string}"
+  association_name            = "Gather-Software-Inventory-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity         = "CRITICAL"
   name                        = "AWS-GatherSoftwareInventory"
   parameters = {
@@ -336,7 +345,7 @@ resource "aws_ssm_association" "software-inventory" {
 
 resource "aws_ssm_association" "patching" {
   apply_only_at_cron_interval = true
-  association_name            = "RunPatchBaseline-DailyCheck-${var.ssm_association_random_string}"
+  association_name            = "Run-Patch-Baseline-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity         = "CRITICAL"
   name                        = "AWS-RunPatchBaseline"
   parameters = {

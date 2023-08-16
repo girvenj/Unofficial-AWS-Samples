@@ -9,7 +9,7 @@ terraform {
 }
 resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule" {
   domain_name          = var.r53_rule_domain_name
-  name                 = "${var.r53_rule_name}-${var.r53_rule_random_string}"
+  name                 = "${var.r53_rule_name}-R53-Resolver-Rule-${var.r53_rule_random_string}"
   rule_type            = "FORWARD"
   resolver_endpoint_id = var.r53_rule_r53_outbound_resolver_id
   tags = {
@@ -26,7 +26,7 @@ resource "aws_route53_resolver_rule" "r53_outbound_resolver_rule" {
 }
 
 resource "aws_route53_resolver_rule_association" "r53_outbound_resolver_rule_association" {
-  name             = "${var.r53_rule_name}-${var.r53_rule_random_string}-Association"
+  name             = "${lower(var.r53_rule_name)}-R53-Resolver-Rule-${var.r53_rule_random_string}-Association"
   resolver_rule_id = aws_route53_resolver_rule.r53_outbound_resolver_rule.id
   vpc_id           = var.r53_rule_vpc_id
 }

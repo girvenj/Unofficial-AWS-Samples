@@ -265,11 +265,12 @@ module "network_peer" {
 }
 
 module "r53_outbound_resolver" {
-  source                     = "./modules/r53-outbound-resolver"
-  r53_resolver_name          = var.r53_resolver_name
-  r53_resolver_random_string = random_string.random_string.result
-  r53_resolver_subnet_ids    = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
-  r53_resolver_vpc_id        = module.network.vpc_id
+  source                      = "./modules/r53-resolver"
+  r53_create_inbound_resolver = var.r53_deploy_inbound_resolver
+  r53_resolver_name           = var.r53_resolver_name
+  r53_resolver_random_string  = random_string.random_string.result
+  r53_resolver_subnet_ids     = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
+  r53_resolver_vpc_id         = module.network.vpc_id
 }
 
 module "managed_ad" {
@@ -282,6 +283,9 @@ module "managed_ad" {
   mad_secret_kms_key                       = var.use_customer_managed_keys ? module.kms_secret_key[0].kms_alias_name : "alias/aws/secretsmanager"
   mad_subnet_ids                           = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
   mad_vpc_id                               = module.network.vpc_id
+  #depends_on = [
+  #  module.kms_secret_key
+  #]
 }
 
 module "connect_ad" {
@@ -294,9 +298,6 @@ module "connect_ad" {
   cad_size                = var.cad_size
   cad_subnet_ids          = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
   cad_vpc_id              = module.network.vpc_id
-  depends_on = [
-    module.r53_outbound_resolver_rule_onprem_root
-  ]
 }
 
 /*module "managed_ad_new_region" {
@@ -310,8 +311,11 @@ module "connect_ad" {
   mad_new_region_domain_fqdn                          = var.mad_domain_fqdn
   mad_new_region_random_string                        = random_string.random_string.result
   mad_new_region_region_name                          = var.aws_region_secondary
-  mad_new_region_subnet_ids                           = [module.network_secondary.public_subnet2_id, module.network_secondary.public_subnet2_id]
+  mad_new_region_subnet_ids                           = [module.network_secondary.nat_subnet1_id, module.network_secondary.nat_subnet2_id]
   mad_new_region_vpc_id                               = module.network_secondary.vpc_id
+  depends_on = [
+    module.onprem_root_dc_instance
+  ]
 }*/
 
 module "r53_outbound_resolver_rule_mad" {
@@ -337,6 +341,9 @@ module "r53_outbound_resolver_rule_mad" {
   fsx_mad_subnet_ids                      = [module.network.nat_subnet1_id]
   fsx_mad_throughput_capacity             = var.fsx_mad_throughput_capacity
   fsx_mad_vpc_id                          = module.network.vpc_id
+  depends_on = [
+    module.kms_fsx_key
+  ]
 }
 
 module "rds_mad" {
@@ -355,6 +362,10 @@ module "rds_mad" {
   rds_subnet_ids        = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
   rds_username          = var.rds_username
   rds_vpc_id            = module.network.vpc_id
+  #depends_on = [
+  #  module.kms_secret_key,
+  #  module.kms_rds_key
+  #]
 }*/
 
 module "ssm_docs" {
@@ -479,7 +490,7 @@ module "onprem_root_dc_instance" {
   source                                  = "./modules/ec2-root-dc"
   mad_admin_secret                        = module.managed_ad.managed_ad_password_secret_id
   mad_domain_fqdn                         = module.managed_ad.managed_ad_domain_name
-  mad_directory_id                   = module.managed_ad.managed_ad_id
+  mad_directory_id                        = module.managed_ad.managed_ad_id
   mad_trust_direction                     = var.mad_trust_direction
   onprem_root_dc_adc_svc_username         = var.onprem_root_dc_adc_svc_username
   onprem_root_dc_deploy_adc               = var.onprem_root_dc_deploy_adc
@@ -491,8 +502,6 @@ module "onprem_root_dc_instance" {
   onprem_root_dc_ec2_ami_owner            = var.ec2_ami_owner
   onprem_root_dc_ec2_instance_type        = var.default_ec2_instance_type
   onprem_root_dc_ec2_launch_template      = aws_launch_template.main.id
-  onprem_root_dc_fsx_administrators_group = var.onprem_root_dc_fsx_administrators_group
-  onprem_root_dc_fsx_ou                   = var.onprem_root_dc_fsx_ou
   onprem_root_dc_fsx_svc_username         = var.onprem_root_dc_fsx_svc_username
   onprem_root_dc_patch_group_tag          = "${var.patch_group_tag}-${random_string.random_string.result}"
   onprem_root_dc_random_string            = random_string.random_string.result
@@ -538,11 +547,6 @@ module "mad_mgmt_instance" {
   mad_mgmt_subnet_id                = module.network.nat_subnet1_id
   mad_mgmt_use_customer_managed_key = var.use_customer_managed_keys
   mad_mgmt_vpc_cidr                 = module.network.vpc_cidr
-  onprem_domain_fqdn                = module.onprem_root_dc_instance.onprem_ad_domain_name
-  mad_trust_direction               = module.onprem_root_dc_instance.mad_trust_direction
-  depends_on = [
-    module.r53_outbound_resolver_rule_onprem_root
-  ]
 }
 
 /*module "fsx_onpremises" {
@@ -564,9 +568,10 @@ module "mad_mgmt_instance" {
   fsx_self_username                         = var.onprem_root_dc_fsx_svc_username
   fsx_self_vpc_id                           = module.network.vpc_id
   depends_on = [
-    module.r53_outbound_resolver_rule_onprem_root
+    module.r53_outbound_resolver_rule_onprem_root#,
+    #module.kms_fsx_key
   ]
-}*/
+}
 
 module "onprem_pki_instance" {
   source                              = "./modules/ec2-pki"
@@ -592,7 +597,7 @@ module "onprem_pki_instance" {
   ]
 }
 
-/*module "onprem_child_dc_instance" {
+module "onprem_child_dc_instance" {
   source                                   = "./modules/ec2-child-dc"
   onprem_administrator_secret              = module.onprem_root_dc_instance.onprem_ad_password_secret_id
   onprem_administrator_secret_kms_key      = var.use_customer_managed_keys ? module.kms_secret_key[0].kms_alias_name : "alias/aws/secretsmanager"
@@ -709,9 +714,6 @@ module "ssm_updates_software" {
   ssm_association_max_errors                   = var.ssm_association_max_errors
   ssm_association_patch_group_tag              = "${var.patch_group_tag}-${random_string.random_string.result}"
   ssm_association_random_string                = random_string.random_string.result
-  depends_on = [
-    module.onprem_pki_instance
-  ]
 }
 
 data "aws_iam_policy_document" "amazon_ssm_managed_ec2_instance_default_role" {
@@ -736,22 +738,12 @@ resource "aws_iam_role" "amazon_ssm_managed_ec2_instance_default_role" {
   }
 }
 
-resource "aws_ssm_service_setting" "test_setting" {
+resource "aws_ssm_service_setting" "default_role" {
   setting_id    = "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:servicesetting/ssm/managed-instance/default-ec2-instance-management-role"
   setting_value = "service-role/${aws_iam_role.amazon_ssm_managed_ec2_instance_default_role.name}"
 }
 
-/*
-resource "aws_ec2_tag" "onprem_root_dc_instance" {
-  resource_id = module.onprem_root_dc_instance.onprem_ad_instance_id
-  key         = "PatchGroup"
-  value       = "${var.patch_group_tag}-${random_string.random_string.result}"
-  #depends_on = [
-  #  module.r53_outbound_resolver_rule_onprem_child
-  #]
-}
-
-resource "aws_acmpca_certificate_authority" "root" {
+/*resource "aws_acmpca_certificate_authority" "root" {
   type = "ROOT"
 
   certificate_authority_configuration {

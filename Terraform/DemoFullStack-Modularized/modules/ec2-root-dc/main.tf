@@ -51,7 +51,7 @@ data "aws_iam_policy_document" "ec2" {
   statement {
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     effect    = "Allow"
-    resources = [module.store_secret_administrator.secret_id, module.store_secret_cad_svc.secret_id, module.store_secret_fsx_svc.secret_id, var.mad_admin_secret]
+    resources = [module.store_secret_administrator.secret_id, var.mad_admin_secret]
   }
   statement {
     actions   = ["ec2:DescribeInstances", "ec2:DescribeSecurityGroups", "ssm:DescribeInstanceInformation", "ssm:GetAutomationExecution", "ssm:ListCommands", "ssm:ListCommandInvocations", "ds:CreateConditionalForwarder", "ds:CreateTrust", "ds:DescribeTrusts", "ds:VerifyTrust"]
@@ -82,7 +82,7 @@ data "aws_iam_policy_document" "ec2" {
       test     = "ForAnyValue:StringEquals"
       variable = "ssm:ResourceTag/aws:cloudformation:stack-name"
       values = [
-        "instance-root-dc-${var.onprem_root_dc_random_string}"
+        "instance-onprem-root-dc-${var.onprem_root_dc_random_string}"
       ]
     }
     resources = ["arn:${data.aws_partition.main.partition}:ec2:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:instance/*"]
@@ -91,9 +91,51 @@ data "aws_iam_policy_document" "ec2" {
     actions = ["cloudformation:SignalResource"]
     effect  = "Allow"
     resources = [
-      "arn:${data.aws_partition.main.partition}:cloudformation:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:stack/instance-root-dc-${var.onprem_root_dc_random_string}/*"
+      "arn:${data.aws_partition.main.partition}:cloudformation:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:stack/instance-onprem-root-dc-${var.onprem_root_dc_random_string}/*"
     ]
   }
+}
+
+resource "aws_iam_role_policy" "fsx_svc" {
+  name  = "fsx-svc-policy"
+  count = var.onprem_root_dc_deploy_fsx ? 1 : 0
+  role  = aws_iam_role.ec2.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Effect = "Allow"
+        Resource = [
+          module.store_secret_fsx_svc[0].secret_arn
+        ]
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "cad_svc" {
+  name  = "adc-svc-policy"
+  count = var.onprem_root_dc_deploy_adc ? 1 : 0
+  role  = aws_iam_role.ec2.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Effect = "Allow"
+        Resource = [
+          module.store_secret_cad_svc[0].secret_arn
+        ]
+      },
+    ]
+  })
 }
 
 resource "aws_iam_role_policy" "kms" {
@@ -118,14 +160,14 @@ resource "aws_iam_role_policy" "kms" {
 
 resource "aws_kms_grant" "kms_administrator_secret" {
   count             = var.onprem_root_dc_use_customer_managed_key ? 1 : 0
-  name              = "kms-administrator-secret-grant"
+  name              = "kms-decrypt-secret-grant-onprem-root-dc"
   key_id            = data.aws_kms_key.kms.id
   grantee_principal = aws_iam_role.ec2.arn
   operations        = ["Decrypt"]
 }
 
 resource "aws_iam_role" "ec2" {
-  name               = "Onprem-Root-DC-EC2-Instance-IAM-Role-${var.onprem_root_dc_random_string}"
+  name               = "Onprem-Root-DC-${var.onprem_root_dc_domain_fqdn}-EC2-Instance-IAM-Role-${var.onprem_root_dc_random_string}"
   assume_role_policy = data.aws_iam_policy_document.ec2_instance_assume_role_policy.json
   inline_policy {
     name   = "build-policy"
@@ -136,7 +178,7 @@ resource "aws_iam_role" "ec2" {
     "arn:${data.aws_partition.main.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
   ]
   tags = {
-    Name = "Onprem-Root-DC-EC2-Instance-IAM-Role-${var.onprem_root_dc_random_string}"
+    Name = "Onprem-Root-DC-${var.onprem_root_dc_domain_fqdn}-EC2-Instance-IAM-Role-${var.onprem_root_dc_random_string}"
   }
 }
 
@@ -165,7 +207,7 @@ resource "random_password" "adc_svc" {
 
 module "store_secret_administrator" {
   source                  = "../secret"
-  name                    = "${var.onprem_root_dc_domain_fqdn}-Onprem-Administrator-Secret-${var.onprem_root_dc_random_string}"
+  name                    = "Onprem-${var.onprem_root_dc_domain_fqdn}-Administrator-Secret-${var.onprem_root_dc_random_string}"
   username                = "Administrator"
   password                = random_password.administrator.result
   recovery_window_in_days = 0
@@ -173,8 +215,9 @@ module "store_secret_administrator" {
 }
 
 module "store_secret_fsx_svc" {
+  count                   = var.onprem_root_dc_deploy_fsx ? 1 : 0
   source                  = "../secret"
-  name                    = "${var.onprem_root_dc_domain_fqdn}-Onprem-FSx-Svc-Secret-${var.onprem_root_dc_random_string}"
+  name                    = "Onprem-${var.onprem_root_dc_domain_fqdn}-FSx-Svc-Secret-${var.onprem_root_dc_random_string}"
   username                = var.onprem_root_dc_fsx_svc_username
   password                = random_password.fsx_svc.result
   recovery_window_in_days = 0
@@ -182,8 +225,9 @@ module "store_secret_fsx_svc" {
 }
 
 module "store_secret_cad_svc" {
+  count                   = var.onprem_root_dc_deploy_adc ? 1 : 0
   source                  = "../secret"
-  name                    = "${var.onprem_root_dc_domain_fqdn}-Onprem-CAD-Svc-Secret-${var.onprem_root_dc_random_string}"
+  name                    = "Onprem-${var.onprem_root_dc_domain_fqdn}-CAD-Svc-Secret-${var.onprem_root_dc_random_string}"
   username                = var.onprem_root_dc_adc_svc_username
   password                = random_password.adc_svc.result
   recovery_window_in_days = 0
@@ -191,14 +235,12 @@ module "store_secret_cad_svc" {
 }
 
 resource "aws_cloudformation_stack" "instance_root_dc" {
-  name = "instance-root-dc-${var.onprem_root_dc_random_string}"
+  name = "instance-onprem-root-dc-${var.onprem_root_dc_random_string}"
   parameters = {
-    AdcSvcSecret              = module.store_secret_cad_svc.secret_id
+    AdcSvcSecret              = var.onprem_root_dc_deploy_adc ? module.store_secret_cad_svc[0].secret_id : "placeholder" 
     AMI                       = data.aws_ami.ami.id
     EbsKmsKey                 = var.onprem_root_dc_ebs_kms_key
-    FsxOnpremAdmins           = var.onprem_root_dc_fsx_administrators_group
-    FsxOnpremParentOu         = var.onprem_root_dc_fsx_ou
-    FsxOnpremSvcSecret        = module.store_secret_fsx_svc.secret_id
+    FsxOnpremSvcSecret        = var.onprem_root_dc_deploy_fsx ? module.store_secret_fsx_svc[0].secret_id : "placeholder"
     IntegrateAdConnector      = tostring(var.onprem_root_dc_deploy_adc)
     IntegrateFsxOnprem        = tostring(var.onprem_root_dc_deploy_fsx)
     InstanceProfile           = aws_iam_instance_profile.ec2.id
@@ -229,12 +271,6 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
         Type: String
       EbsKmsKey:
         Description: Alias for the KMS encryption key used to encrypt the EBS volumes
-        Type: String
-      FsxOnpremAdmins:
-        Description: The name of the domain group whose members are granted administrative privileges for the file system
-        Type: String
-      FsxOnpremParentOu:
-        Description: Parent DN for Amazon FSX for Windows OU (Only used when deployment with On-Premises AD)
         Type: String
       FsxOnpremSvcSecret:
         Description: The secret containing the password for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain
@@ -360,8 +396,6 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
                       DeploymentType = 'RootDomainController'
                       DomainDNSName = '$${DomainDNSName}'
                       DomainNetBIOSName = '$${OnpremNetBiosName}'
-                      FsxOnpremAdmins = '$${FsxOnpremAdmins}'
-                      FsxOnpremParentOu = '$${FsxOnpremParentOu}'
                       FsxOnpremSvcSecret = '$${FsxOnpremSvcSecret}'
                       IntegrateAdConnector = '$${IntegrateAdConnector}'
                       IntegrateFsxOnprem = '$${IntegrateFsxOnprem}'
@@ -371,7 +405,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
                       AdministratorSecretName = '$${AdministratorSecretName}'
                       ServerNetBIOSName = '$${ServerNetBIOSName}'
                       ServerRole = 'DomainController'
-                      StackName = 'instance-root-dc-${var.onprem_root_dc_random_string}'
+                      StackName = 'instance-onprem-root-dc-${var.onprem_root_dc_random_string}'
                       TrustDirection = '$${TrustDirection}'
                       TrustSecretName = '$${TrustSecretName}'
                       VPCCIDR = '$${VPCCIDR}'
@@ -381,8 +415,6 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
               - AdcSvcSecret: !Ref AdcSvcSecret
                 AdministratorSecretName: !Ref OnPremAdministratorSecret
                 DomainDNSName: !Ref OnpremDomainName
-                FsxOnpremAdmins: !Ref FsxOnpremAdmins
-                FsxOnpremParentOu: !Ref FsxOnpremParentOu
                 FsxOnpremSvcSecret: !Ref FsxOnpremSvcSecret
                 IntegrateAdConnector: !Ref IntegrateAdConnector
                 IntegrateFsxOnprem: !Ref IntegrateFsxOnprem

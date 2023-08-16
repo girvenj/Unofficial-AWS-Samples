@@ -87,17 +87,3 @@ variable "mad_mgmt_vpc_cidr" {
   description = "VPC CIDDR the instance will be deployed to."
   type        = string
 }
-
-variable "mad_trust_direction" {
-  description = "Direction of trust between MAD and onpremises AD."
-  type        = string
-  validation {
-    condition     = contains(["None", "Two-Way", "One-Way: Incoming", "One-Way: Outgoing"], var.mad_trust_direction)
-    error_message = "The edition value must be None, Two-Way, One-Way: Incoming, or One-Way: Outgoing."
-  }
-}
-
-variable "onprem_domain_fqdn" {
-  description = "The fully qualified name for the onpremises domain, such as onpremises.local."
-  type        = string
-}

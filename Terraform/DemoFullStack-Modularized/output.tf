@@ -39,14 +39,6 @@ output "onprem_ad_ip" {
   value = module.onprem_root_dc_instance.onprem_ad_ip
 }
 
-output "onprem_pki_instance_id" {
-  value = module.onprem_pki_instance.onprem_pki_instance_id
-}
-
-output "onprem_pki_ip" {
-  value = module.onprem_pki_instance.onprem_pki_ip
-}
-
 output "onprem_ad_password_secret_id" {
   value = module.onprem_root_dc_instance.onprem_ad_password_secret_id
 }

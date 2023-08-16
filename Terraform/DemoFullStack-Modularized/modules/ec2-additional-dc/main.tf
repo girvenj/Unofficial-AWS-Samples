@@ -76,7 +76,7 @@ data "aws_iam_policy_document" "ec2" {
       test     = "ForAnyValue:StringEquals"
       variable = "ssm:ResourceTag/aws:cloudformation:stack-name"
       values = [
-        "instance-additional-dc-${var.onprem_additional_dc_random_string}"
+        "instance-onprem-additional-dc-${var.onprem_additional_dc_random_string}"
       ]
     }
     resources = ["arn:${data.aws_partition.main.partition}:ec2:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:instance/*"]
@@ -85,13 +85,13 @@ data "aws_iam_policy_document" "ec2" {
     actions = ["cloudformation:SignalResource"]
     effect  = "Allow"
     resources = [
-      "arn:${data.aws_partition.main.partition}:cloudformation:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:stack/instance-additional-dc-${var.onprem_additional_dc_random_string}/*"
+      "arn:${data.aws_partition.main.partition}:cloudformation:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:stack/instance-onprem-additional-dc-${var.onprem_additional_dc_random_string}/*"
     ]
   }
 }
 
 resource "aws_iam_role" "ec2" {
-  name               = "Onprem-Additional-DC-EC2-Instance-IAM-Role-${var.onprem_additional_dc_random_string}"
+  name               = "Additional-DC-${var.onprem_domain_fqdn}-EC2-Instance-IAM-Role-${var.onprem_additional_dc_random_string}"
   assume_role_policy = data.aws_iam_policy_document.ec2_instance_assume_role_policy.json
   inline_policy {
     name   = "build-policy"
@@ -102,7 +102,7 @@ resource "aws_iam_role" "ec2" {
     "arn:${data.aws_partition.main.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
   ]
   tags = {
-    Name = "Onprem-Additional-DC-EC2-Instance-IAM-Role-${var.onprem_additional_dc_random_string}"
+    Name = "Additional-DC-${var.onprem_domain_fqdn}-EC2-Instance-IAM-Role-${var.onprem_additional_dc_random_string}"
   }
 }
 
@@ -133,14 +133,14 @@ resource "aws_iam_role_policy" "kms" {
 
 resource "aws_kms_grant" "kms_admin_secret" {
   count             = var.onprem_additional_dc_use_customer_managed_key ? 1 : 0
-  name              = "kms-admin-secret-grant"
+  name              = "kms-decrypt-secret-grant-onprem-additional-dc"
   key_id            = data.aws_kms_key.kms.id
   grantee_principal = aws_iam_role.ec2.arn
   operations        = ["Decrypt"]
 }
 
 resource "aws_cloudformation_stack" "instance_additional_dc" {
-  name = "instance-additional-dc-${var.onprem_additional_dc_random_string}"
+  name = "instance-onprem-additional-dc-${var.onprem_additional_dc_random_string}"
   parameters = {
     AMI                       = data.aws_ami.ami.id
     EbsKmsKey                 = var.onprem_additional_dc_ebs_kms_key
@@ -264,7 +264,7 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
                       ParentInstanceIP = '$${ParentInstanceIP}'
                       ServerNetBIOSName = '$${ServerNetBIOSName}'
                       ServerRole = 'DomainController'
-                      StackName = 'instance-additional-dc-${var.onprem_additional_dc_random_string}'
+                      StackName = 'instance-onprem-additional-dc-${var.onprem_additional_dc_random_string}'
                       VPCCIDR = '$${VPCCIDR}'
                   }
                   Start-SSMAutomationExecution -DocumentName '$${SsmAutoDocument}' -Parameter $Params

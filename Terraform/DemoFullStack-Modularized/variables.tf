@@ -196,16 +196,6 @@ variable "onprem_root_dc_domain_netbios" {
   type        = string
 }
 
-variable "onprem_root_dc_fsx_administrators_group" {
-  description = "The name of the domain group whose members are granted administrative privileges for the file system."
-  type        = string
-}
-
-variable "onprem_root_dc_fsx_ou" {
-  description = "FSx integrated with onpremises AD parent OU."
-  type        = string
-}
-
 variable "onprem_root_dc_fsx_svc_username" {
   description = "The user name for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain."
   type        = string
@@ -224,6 +214,11 @@ variable "onprem_root_pki_server_netbios_name" {
 variable "patch_group_tag" {
   description = "Tag value for maintenance window and association application."
   type        = string
+}
+
+variable "r53_deploy_inbound_resolver" {
+  description = "Deploy R53 Inbound Resolver, R53 Outbound Resolver is deployed by default."
+  type        = bool
 }
 
 variable "r53_resolver_name" {
@@ -267,11 +262,11 @@ variable "rds_port_number" {
 }
 
 variable "rds_storage_type" {
-  description = "One of standard (magnetic), gp2 (general purpose SSD), or io1 (provisioned IOPS SSD)."
+  description = "One of standard (magnetic), gp2 & gp3 (general purpose SSD), or io1 (provisioned IOPS SSD)."
   type        = string
   validation {
-    condition     = contains(["gp2", "io1", "standard"], var.rds_storage_type)
-    error_message = "The storage type. value must be gp2, io1, or standard."
+    condition     = contains(["gp2", "gp3", "io1", "standard"], var.rds_storage_type)
+    error_message = "The storage type. value must be gp2, gp3, io1, or standard."
   }
 }
 

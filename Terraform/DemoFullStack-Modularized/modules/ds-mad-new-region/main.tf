@@ -19,7 +19,7 @@ resource "aws_directory_service_region" "main" {
     subnet_ids = var.mad_new_region_subnet_ids
   }
   tags = {
-    Name = "${var.mad_new_region_domain_fqdn}-MAD-${var.mad_new_region_random_string}"
+    Name = "MAD-${var.mad_new_region_domain_fqdn}-${var.mad_new_region_random_string}"
   }
 }
 

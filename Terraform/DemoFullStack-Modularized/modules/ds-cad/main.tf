@@ -13,13 +13,13 @@ data "aws_secretsmanager_secret_version" "main" {
 }
 
 resource "aws_directory_service_directory" "main" {
-  name     = var.cad_domain_fqdn
-  password = jsondecode(data.aws_secretsmanager_secret_version.main.secret_string)["password"]
+  name       = var.cad_domain_fqdn
+  password   = jsondecode(data.aws_secretsmanager_secret_version.main.secret_string)["password"]
   short_name = var.cad_domain_netbios_name
   size       = var.cad_size
   type       = "ADConnector"
   tags = {
-    Name = "${var.cad_domain_fqdn}-CAD-${var.cad_random_string}"
+    Name = "CAD-${var.cad_domain_fqdn}-${var.cad_random_string}"
   }
   connect_settings {
     customer_dns_ips  = var.cad_dns_ips

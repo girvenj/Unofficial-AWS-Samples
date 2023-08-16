@@ -92,7 +92,7 @@ data "aws_iam_policy_document" "ec2" {
 }
 
 resource "aws_iam_role" "ec2" {
-  name               = "MAD-Mgmt-EC2-Instance-IAM-Role-${var.mad_mgmt_random_string}"
+  name               = "MAD-Mgmt-${var.mad_mgmt_domain_fqdn}-EC2-Instance-IAM-Role-${var.mad_mgmt_random_string}"
   assume_role_policy = data.aws_iam_policy_document.ec2_instance_assume_role_policy.json
   inline_policy {
     name   = "build-policy"
@@ -103,7 +103,7 @@ resource "aws_iam_role" "ec2" {
     "arn:${data.aws_partition.main.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
   ]
   tags = {
-    Name = "MAD-Mgmt-EC2-Instance-IAM-Role-${var.mad_mgmt_random_string}"
+    Name = "MAD-Mgmt-${var.mad_mgmt_domain_fqdn}-EC2-Instance-IAM-Role-${var.mad_mgmt_random_string}"
   }
 }
 
@@ -134,7 +134,7 @@ resource "aws_iam_role_policy" "kms" {
 
 resource "aws_kms_grant" "kms_admin_secret" {
   count             = var.mad_mgmt_use_customer_managed_key ? 1 : 0
-  name              = "kms-admin-secret-grant"
+  name              = "kms-decrypt-secret-grant-mad-mgmt"
   key_id            = data.aws_kms_key.kms.id
   grantee_principal = aws_iam_role.ec2.arn
   operations        = ["Decrypt"]
@@ -152,12 +152,10 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
     MadAdminSecret    = var.mad_mgmt_admin_secret
     MadDomainName     = var.mad_mgmt_domain_fqdn
     MadNetBiosName    = var.mad_mgmt_domain_netbios
-    OnpremDomainName  = var.onprem_domain_fqdn
     SecurityGroupId   = var.mad_mgmt_security_group_id
     ServerNetBIOSName = var.mad_mgmt_server_netbios_name
     SsmAutoDocument   = var.mad_mgmt_ssm_docs[0]
     SubnetId          = var.mad_mgmt_subnet_id
-    TrustDirection    = var.mad_trust_direction
     VPCCIDR           = var.mad_mgmt_vpc_cidr
   }
 
@@ -201,12 +199,6 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
         MaxLength: '15'
         MinLength: '1'
         Type: String
-      OnpremDomainName:
-        AllowedPattern: ^([a-zA-Z0-9]+(-[a-zA-Z0-9]+)*\.)+[a-zA-Z]{2,}$
-        Description: Fully qualified domain name (FQDN) of the On-Premises domain e.g. onpremises.local
-        MaxLength: '255'
-        MinLength: '2'
-        Type: String
       SecurityGroupId:
         Description: Security Group Id
         Type: AWS::EC2::SecurityGroup::Id
@@ -218,14 +210,6 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
         Type: AWS::EC2::Subnet::Id
       SsmAutoDocument:
         Description: SSM Automation Document used to configure the instances
-        Type: String
-      TrustDirection:
-        AllowedValues:
-          - Two-Way
-          - 'One-Way: Incoming'
-          - 'One-Way: Outgoing'
-          - None
-        Description: Trust Direction from AWS Managed Microsoft AD to on-premises domain
         Type: String
       VPCCIDR:
         Description: VPC CIDR where instance will be deployed to
@@ -291,11 +275,9 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                       DomainNetBIOSName = '$${DomainNetBIOSName}'
                       DomainType = 'AWSManagedAD'
                       LogicalResourceId = 'MADMgmtInstance'
-                      OnpremDomainDNSName = '$${OnpremDomainDNSName}'
                       ServerNetBIOSName = '$${ServerNetBIOSName}'
                       ServerRole = $ServerRole
                       StackName = 'instance-mad-mgmt-${var.mad_mgmt_random_string}'
-                      TrustDirection = '$${TrustDirection}'
                       VPCCIDR = '$${VPCCIDR}'
                   }
                   Start-SSMAutomationExecution -DocumentName '$${SsmAutoDocument}' -Parameter $Params
@@ -304,9 +286,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                 DeployMadPki: !Ref DeployMadPki
                 DomainDNSName: !Ref MadDomainName
                 DomainNetBIOSName: !Ref MadNetBiosName
-                OnpremDomainDNSName: !Ref OnpremDomainName
                 ServerNetBIOSName: !Ref ServerNetBIOSName
-                TrustDirection: !Ref TrustDirection
                 VPCCIDR: !Ref VPCCIDR
     Outputs:
       MADMgmtInstanceID:

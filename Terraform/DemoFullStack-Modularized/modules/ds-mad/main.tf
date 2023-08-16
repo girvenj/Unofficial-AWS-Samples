@@ -20,7 +20,7 @@ resource "random_password" "main" {
 
 module "store_secret" {
   source                  = "../secret"
-  name                    = "${var.mad_domain_fqdn}-MAD-Admin-Secret-${var.mad_random_string}"
+  name                    = "MAD-${var.mad_domain_fqdn}-Admin-Secret-${var.mad_random_string}"
   username                = "Admin"
   password                = random_password.main.result
   recovery_window_in_days = 0
@@ -35,7 +35,7 @@ resource "aws_directory_service_directory" "main" {
   password                             = random_password.main.result
   short_name                           = var.mad_domain_netbios
   tags = {
-    Name = "${var.mad_domain_fqdn}-MAD-${var.mad_random_string}"
+    Name = "MAD-${var.mad_domain_fqdn}-${var.mad_random_string}"
   }
   type = "MicrosoftAD"
   vpc_settings {

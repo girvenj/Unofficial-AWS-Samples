@@ -11,11 +11,11 @@ output "onprem_ad_password_secret_id" {
 }
 
 output "onprem_ad_cad_svc_secret_id" {
-  value = module.store_secret_cad_svc.secret_id
+  value = join("", module.store_secret_cad_svc[*].secret_id)
 }
 
 output "onprem_ad_fsx_svc_secret_id" {
-  value = module.store_secret_fsx_svc.secret_id
+  value = join("", module.store_secret_fsx_svc[*].secret_id)
 }
 
 output "onprem_ad_domain_name" {
@@ -28,12 +28,4 @@ output "onprem_ad_netbios_name" {
 
 output "mad_trust_direction" {
   value = aws_cloudformation_stack.instance_root_dc.parameters.TrustDirection
-}
-
-output "onprem_ad_fsx_ou" {
-  value = aws_cloudformation_stack.instance_root_dc.parameters.FsxOnpremParentOu
-}
-
-output "onprem_ad_fsx_admin" {
-  value = aws_cloudformation_stack.instance_root_dc.parameters.FsxOnpremAdmins
 }

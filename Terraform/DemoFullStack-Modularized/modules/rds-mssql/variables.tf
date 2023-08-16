@@ -49,11 +49,11 @@ variable "rds_secret_kms_key" {
 }
 
 variable "rds_storage_type" {
-  description = "One of standard (magnetic), gp2 (general purpose SSD), or io1 (provisioned IOPS SSD)."
+  description = "One of standard (magnetic), gp2 & gp3 (general purpose SSD), or io1 (provisioned IOPS SSD)."
   type        = string
   validation {
-    condition     = contains(["gp2", "io1", "standard"], var.rds_storage_type)
-    error_message = "The storage type. value must be gp2, io1, or standard."
+    condition     = contains(["gp2", "gp3", "io1", "standard"], var.rds_storage_type)
+    error_message = "The storage type. value must be gp2, gp3, io1, or standard."
   }
 }
 

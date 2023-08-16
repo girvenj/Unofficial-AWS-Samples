@@ -41,8 +41,8 @@ locals {
 
 module "fsx_security_group" {
   source      = "../vpc-security-group-ingress"
-  name        = "${var.fsx_mad_alias}-FSx-Security-Group-${var.fsx_mad_random_string}"
-  description = "${var.fsx_mad_alias} FSx Security Group"
+  name        = "FSx-MAD-${var.fsx_mad_alias}-Security-Group-${var.fsx_mad_random_string}"
+  description = "FSx MAD ${var.fsx_mad_alias} Security Group"
   vpc_id      = var.fsx_mad_vpc_id
   ports       = local.fsx_ports
 }
@@ -61,13 +61,13 @@ resource "aws_fsx_windows_file_system" "main" {
   subnet_ids                      = var.fsx_mad_subnet_ids
   throughput_capacity             = var.fsx_mad_throughput_capacity
   tags = {
-    Name = "${var.fsx_mad_alias}-${var.fsx_mad_random_string}"
+    Name = "FSx-MAD-${var.fsx_mad_alias}-${var.fsx_mad_random_string}"
   }
 }
 
-resource "aws_ec2_tag" "eni" {
-  for_each    = aws_fsx_windows_file_system.main.network_interface_ids
-  resource_id = each.value
-  key         = "Name"
-  value       = "${var.fsx_mad_alias}-${var.fsx_mad_random_string}"
-}
+#resource "aws_ec2_tag" "eni" {
+#  for_each    = aws_fsx_windows_file_system.main.network_interface_ids
+#  resource_id = each.value
+#  key         = "Name"
+#  value       = "FSx-MAD-${var.fsx_mad_alias}-${var.fsx_mad_random_string}"
+#}
