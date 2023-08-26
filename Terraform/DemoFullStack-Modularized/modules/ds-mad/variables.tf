@@ -27,11 +27,6 @@ variable "mad_random_string" {
   type        = string
 }
 
-variable "mad_secret_kms_key" {
-  description = "Alias for the KMS encryption key used to encrypt the Secrets."
-  type        = string
-}
-
 variable "mad_subnet_ids" {
   description = "Private subnet IDs the AWS Managed Microsoft AD will be deployed to."
   type        = list(string)

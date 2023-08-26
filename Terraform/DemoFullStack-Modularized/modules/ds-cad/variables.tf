@@ -13,8 +13,8 @@ variable "cad_domain_netbios_name" {
   type        = string
 }
 
-variable "cad_password_secret" {
-  description = "The password for the service account on your self-managed AD domain that AD COnnector will use."
+variable "cad_parent_ou_dn" {
+  description = "The fully qualified distinguished name of the organizational unit within your AD directory containing the AD Connector se, such as DC=onpremises,DC=local."
   type        = string
 }
 
@@ -37,7 +37,32 @@ variable "cad_subnet_ids" {
   type        = list(string)
 }
 
+variable "cad_svc_username" {
+  description = "The username of the AD Connector Service account."
+  type        = string
+}
+
 variable "cad_vpc_id" {
-  description = "The identifier of the VPC that the directory is in."
+  description = "The ARN of the VPC that the directory is in."
+  type        = string
+}
+
+variable "setup_ec2_iam_role" {
+  description = "IAM role attached to SSM Target EC2 instance."
+  type        = string
+}
+
+variable "setup_secret_arn" {
+  description = "Secret ARN of Secret containing credentials to setup the AD Connector."
+  type        = string
+}
+
+variable "setup_secret_kms_key_arn" {
+  description = "KMS Key ARN used to encrypt Secret containing credentials to setup the FSx Filesystem."
+  type        = string
+}
+
+variable "setup_ssm_target_instance_id" {
+  description = "SSM Target EC2 instance ID."
   type        = string
 }

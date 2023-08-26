@@ -28,11 +28,6 @@ variable "rds_instance_class" {
   type        = string
 }
 
-variable "rds_kms_key" {
-  description = "Alias for the KMS encryption key."
-  type        = string
-}
-
 variable "rds_port_number" {
   description = "RDS SQL Intance integrated with AWS Managed Microsoft AD port number."
   type        = number
@@ -40,11 +35,6 @@ variable "rds_port_number" {
 
 variable "rds_random_string" {
   description = "Random string to ensure resource names are unique."
-  type        = string
-}
-
-variable "rds_secret_kms_key" {
-  description = "Alias for the KMS encryption key used to encrypt the local db admin."
   type        = string
 }
 

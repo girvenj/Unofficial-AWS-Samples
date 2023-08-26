@@ -18,6 +18,12 @@ variable "onprem_domain_netbios" {
   type        = string
 }
 
+variable "onprem_pki_dns_resolver_ip" {
+  description = "IP for DNS resolution of parent domain."
+  type        = list(string)
+}
+
+
 variable "onprem_pki_ebs_kms_key" {
   description = "Alias for the KMS encryption key used to encrypt the EBS volumes."
   type        = string
@@ -71,11 +77,6 @@ variable "onprem_pki_ssm_docs" {
 variable "onprem_pki_subnet_id" {
   description = "The ID of the subnet the instance will be deployed to."
   type        = string
-}
-
-variable "onprem_pki_use_customer_managed_key" {
-  description = "Create and use Customer Managed KMS Keys (CMK) for encryption"
-  type        = bool
 }
 
 variable "onprem_pki_vpc_cidr" {

@@ -112,9 +112,8 @@ resource "aws_iam_instance_profile" "ec2" {
 }
 
 resource "aws_iam_role_policy" "kms" {
-  name  = "kms-policy"
-  count = var.onprem_additional_dc_use_customer_managed_key ? 1 : 0
-  role  = aws_iam_role.ec2.id
+  name = "kms-policy"
+  role = aws_iam_role.ec2.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -132,7 +131,6 @@ resource "aws_iam_role_policy" "kms" {
 }
 
 resource "aws_kms_grant" "kms_admin_secret" {
-  count             = var.onprem_additional_dc_use_customer_managed_key ? 1 : 0
   name              = "kms-decrypt-secret-grant-onprem-additional-dc"
   key_id            = data.aws_kms_key.kms.id
   grantee_principal = aws_iam_role.ec2.arn
@@ -150,7 +148,7 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
     OnPremAdministratorSecret = var.onprem_administrator_secret
     OnpremDomainName          = var.onprem_domain_fqdn
     OnpremNetBiosName         = var.onprem_domain_netbios
-    ParentInstanceIP          = var.onprem_dc_ip
+    DomainDNSResolutionIP     = join(",", var.onprem_domain_dns_resolver_ip)
     SecurityGroupId           = var.onprem_additional_dc_security_group_id
     ServerNetBIOSName         = var.onprem_additional_dc_server_netbios_name
     SsmAutoDocument           = var.onprem_additional_dc_ssm_docs[0]
@@ -164,6 +162,9 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
       AMI:
         #Default: /aws/service/ami-windows-latest/TPM-Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
+        Type: String
+      DomainDNSResolutionIP:
+        Description: IP Address(s) of DNS resolver
         Type: String
       EbsKmsKey:
         Description: Alias for the KMS encryption key used to encrypt the EBS volumes
@@ -191,9 +192,6 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
         Description: NetBIOS name of the On-Premises domain (up to 15 characters) e.g. ONPREMISES
         MaxLength: '15'
         MinLength: '1'
-        Type: String
-      ParentInstanceIP:
-        Description: IP Address of the forest root domain controller
         Type: String
       SecurityGroupId:
         Description: Security Group Id
@@ -259,9 +257,9 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
                       DeployPki = 'No'
                       DeploymentType = 'AdditionalDomainController'
                       DomainDNSName = '$${DomainDNSName}'
+                      DomainDNSResolutionIP = '$${DomainDNSResolutionIP}'
                       DomainNetBIOSName = '$${DomainDNSName}'
                       LogicalResourceId = 'AdditionalOnPremDomainController'
-                      ParentInstanceIP = '$${ParentInstanceIP}'
                       ServerNetBIOSName = '$${ServerNetBIOSName}'
                       ServerRole = 'DomainController'
                       StackName = 'instance-onprem-additional-dc-${var.onprem_additional_dc_random_string}'
@@ -271,8 +269,8 @@ resource "aws_cloudformation_stack" "instance_additional_dc" {
                   </powershell>
               - AdministratorSecretName: !Ref OnPremAdministratorSecret
                 DomainDNSName: !Ref OnpremDomainName
+                DomainDNSResolutionIP: !Ref DomainDNSResolutionIP
                 DomainNetBIOSName: !Ref OnpremNetBiosName
-                ParentInstanceIP: !Ref ParentInstanceIP
                 ServerNetBIOSName: !Ref ServerNetBIOSName
                 VPCCIDR: !Ref VPCCIDR
     Outputs:

@@ -12,6 +12,18 @@ terraform {
   }
 }
 
+locals {
+  rds_ports = [
+    {
+      from_port   = var.rds_port_number
+      to_port     = var.rds_port_number
+      description = "SQL"
+      protocol    = "TCP"
+      cidr_blocks = [data.aws_vpc.main.cidr_block]
+    }
+  ]
+}
+
 data "aws_iam_policy_document" "rds_instance_assume_role_policy" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -19,6 +31,17 @@ data "aws_iam_policy_document" "rds_instance_assume_role_policy" {
     principals {
       type        = "Service"
       identifiers = ["rds.amazonaws.com"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "rds_monitoring_role_assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["monitoring.rds.amazonaws.com"]
     }
   }
 }
@@ -33,10 +56,6 @@ data "aws_availability_zones" "available" {
   }
 }
 
-data "aws_kms_alias" "main" {
-  name = var.rds_kms_key
-}
-
 data "aws_vpc" "main" {
   id = var.rds_vpc_id
 }
@@ -47,13 +66,25 @@ resource "random_password" "main" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
+module "kms_secret_key" {
+  source                          = "../kms"
+  kms_key_description             = "KMS key for RDS encryption"
+  kms_key_usage                   = "ENCRYPT_DECRYPT"
+  kms_customer_master_key_spec    = "SYMMETRIC_DEFAULT"
+  kms_key_deletion_window_in_days = 7
+  kms_enable_key_rotation         = true
+  kms_key_alias_name              = "rds-kms-key"
+  kms_multi_region                = false
+  kms_random_string               = var.rds_random_string
+}
+
 module "store_secret" {
   source                  = "../secret"
   name                    = "RDS-MAD-${var.rds_identifier}-Admin-Secret-${var.rds_random_string}"
   username                = var.rds_username
   password                = random_password.main.result
   recovery_window_in_days = 0
-  secret_kms_key          = var.rds_secret_kms_key
+  secret_kms_key          = module.kms_secret_key.kms_alias_name
 }
 
 resource "aws_iam_role" "rds" {
@@ -65,6 +96,17 @@ resource "aws_iam_role" "rds" {
   }
 }
 
+resource "aws_iam_role" "rds_monitoring_role" {
+  name               = "RDS-MAD-${var.rds_identifier}-Enhanced-Monitoring-Role-${var.rds_random_string}"
+  assume_role_policy = data.aws_iam_policy_document.rds_monitoring_role_assume_role_policy.json
+  managed_policy_arns = [
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  ]
+  tags = {
+    Name = "RDS-MAD-${var.rds_identifier}-Enhanced-Monitoring-Role-${var.rds_random_string}"
+  }
+}
+
 resource "aws_db_subnet_group" "rds" {
   name       = "rds-mad-${var.rds_identifier}-subnet-group-${var.rds_random_string}"
   subnet_ids = var.rds_subnet_ids
@@ -73,46 +115,12 @@ resource "aws_db_subnet_group" "rds" {
   }
 }
 
-locals {
-  rds_ports = [
-    {
-      from_port   = var.rds_port_number
-      to_port     = var.rds_port_number
-      description = "SQL"
-      protocol    = "TCP"
-      cidr_blocks = [data.aws_vpc.main.cidr_block]
-    }
-  ]
-}
-
 module "rds_security_group" {
   source      = "../vpc-security-group-ingress"
   name        = "RDS-MAD-${var.rds_identifier}-Security-Group-${var.rds_random_string}"
   description = "RDS MAD ${var.rds_identifier} Security Group ${var.rds_random_string}"
   vpc_id      = var.rds_vpc_id
   ports       = local.rds_ports
-}
-
-data "aws_iam_policy_document" "rds_assume_role_policy" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    effect  = "Allow"
-    principals {
-      type        = "Service"
-      identifiers = ["monitoring.rds.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_iam_role" "rds_role" {
-  name               = "RDS-MAD-${var.rds_identifier}-Enhanced-Monitoring-Role-${var.rds_random_string}"
-  assume_role_policy = data.aws_iam_policy_document.rds_assume_role_policy.json
-  managed_policy_arns = [
-    "arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-  ]
-  tags = {
-    Name = "RDS-MAD-${var.rds_identifier}-Enhanced-Monitoring-Role-${var.rds_random_string}"
-  }
 }
 
 resource "aws_db_instance" "rds" {
@@ -131,14 +139,14 @@ resource "aws_db_instance" "rds" {
   engine_version                        = var.rds_engine_version
   identifier                            = var.rds_identifier
   instance_class                        = var.rds_instance_class
-  kms_key_id                            = data.aws_kms_alias.main.arn
+  kms_key_id                            = module.kms_secret_key.kms_key_arn
   license_model                         = "license-included"
   monitoring_interval                   = 5
-  monitoring_role_arn                   = aws_iam_role.rds_role.arn
+  monitoring_role_arn                   = aws_iam_role.rds_monitoring_role.arn
   multi_az                              = false
   password                              = random_password.main.result
   performance_insights_enabled          = true
-  performance_insights_kms_key_id       = data.aws_kms_alias.main.arn
+  performance_insights_kms_key_id       = module.kms_secret_key.kms_key_arn
   performance_insights_retention_period = 7
   port                                  = var.rds_port_number
   publicly_accessible                   = false

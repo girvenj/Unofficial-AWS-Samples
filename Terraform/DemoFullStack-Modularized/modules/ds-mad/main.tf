@@ -18,13 +18,25 @@ resource "random_password" "main" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
+module "kms_secret_key" {
+  source                          = "../kms"
+  kms_key_description             = "KMS key for MAD Admin account Secret encryption"
+  kms_key_usage                   = "ENCRYPT_DECRYPT"
+  kms_customer_master_key_spec    = "SYMMETRIC_DEFAULT"
+  kms_key_deletion_window_in_days = 7
+  kms_enable_key_rotation         = true
+  kms_key_alias_name              = "mad-secret-kms-key"
+  kms_multi_region                = false
+  kms_random_string               = var.mad_random_string
+}
+
 module "store_secret" {
   source                  = "../secret"
   name                    = "MAD-${var.mad_domain_fqdn}-Admin-Secret-${var.mad_random_string}"
   username                = "Admin"
   password                = random_password.main.result
   recovery_window_in_days = 0
-  secret_kms_key          = var.mad_secret_kms_key
+  secret_kms_key          = module.kms_secret_key.kms_alias_name
 }
 
 resource "aws_directory_service_directory" "main" {

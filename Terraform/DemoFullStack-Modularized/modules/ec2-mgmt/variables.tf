@@ -13,6 +13,11 @@ variable "mad_mgmt_deploy_pki" {
   type        = bool
 }
 
+variable "mad_mgmt_dns_resolver_ip" {
+  description = "IP for DNS resolution of parent domain."
+  type        = list(string)
+}
+
 variable "mad_mgmt_domain_fqdn" {
   description = "The fully qualified name for the domain, such as corp.example.com."
   type        = string
@@ -76,11 +81,6 @@ variable "mad_mgmt_ssm_docs" {
 variable "mad_mgmt_subnet_id" {
   description = "The ID of the subnet the instance will be deployed to."
   type        = string
-}
-
-variable "mad_mgmt_use_customer_managed_key" {
-  description = "Create and use Customer Managed KMS Keys (CMK) for encryption"
-  type        = bool
 }
 
 variable "mad_mgmt_vpc_cidr" {

@@ -49,7 +49,7 @@ data "aws_iam_policy_document" "ec2" {
     resources = [var.onprem_administrator_secret]
   }
   statement {
-    actions   = ["ec2:DescribeInstances", "ec2:DescribeSecurityGroups", "ssm:DescribeInstanceInformation", "ssm:GetAutomationExecution", "ssm:ListCommands", "ssm:ListCommandInvocations", "ds:CreateConditionalForwarder", "ds:CreateTrust", "ds:DescribeTrusts", "ds:VerifyTrust"]
+    actions   = ["ec2:DescribeInstances", "ssm:DescribeInstanceInformation", "ssm:GetAutomationExecution", "ssm:ListCommands", "ssm:ListCommandInvocations"]
     effect    = "Allow"
     resources = ["*"]
   }
@@ -112,9 +112,8 @@ resource "aws_iam_instance_profile" "ec2" {
 }
 
 resource "aws_iam_role_policy" "kms" {
-  name  = "kms-policy"
-  count = var.onprem_child_dc_use_customer_managed_key ? 1 : 0
-  role  = aws_iam_role.ec2.id
+  name = "kms-policy"
+  role = aws_iam_role.ec2.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -132,7 +131,6 @@ resource "aws_iam_role_policy" "kms" {
 }
 
 resource "aws_kms_grant" "kms_admin_secret" {
-  count             = var.onprem_child_dc_use_customer_managed_key ? 1 : 0
   name              = "kms-decrypt-secret-grant-onprem-child-dc"
   key_id            = data.aws_kms_key.kms.id
   grantee_principal = aws_iam_role.ec2.arn
@@ -150,7 +148,7 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
     OnPremAdministratorSecret = var.onprem_administrator_secret
     OnpremChildNetBiosName    = var.onprem_child_domain_netbios
     OnpremDomainName          = var.onprem_domain_fqdn
-    ParentInstanceIP          = var.onprem_dc_ip
+    DomainDNSResolutionIP     = join(",", var.onprem_domain_dns_resolver_ip)
     SecurityGroupId           = var.onprem_child_dc_security_group_id
     ServerNetBIOSName         = var.onprem_child_dc_server_netbios_name
     SsmAutoDocument           = var.onprem_child_dc_ssm_docs[0]
@@ -164,6 +162,9 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
       AMI:
         #Default: /aws/service/ami-windows-latest/TPM-Windows_Server-2022-English-Full-Base
         Description: System Manager parameter value for latest Windows Server AMI
+        Type: String
+      DomainDNSResolutionIP:
+        Description: IP Address(s) of DNS resolver
         Type: String
       EbsKmsKey:
         Description: Alias for the KMS encryption key used to encrypt the EBS volumes
@@ -191,9 +192,6 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
         Description: Fully qualified domain name (FQDN) of the On-Premises domain e.g. onpremises.local
         MaxLength: '255'
         MinLength: '2'
-        Type: String
-      ParentInstanceIP:
-        Description: IP Address of the forest root domain controller
         Type: String
       SecurityGroupId:
         Description: Security Group Id
@@ -259,10 +257,10 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
                       DeployPki = 'No'
                       DeploymentType = 'ChildDomainController'
                       DomainDNSName = '$${DomainDNSName}'
+                      DomainDNSResolutionIP = '$${DomainDNSResolutionIP}'
                       DomainNetBIOSName = '$${DomainNetBIOSName}'
                       LogicalResourceId = 'ChildOnPremDomainController'
                       ParentDomainDNSName = '$${ParentDomainDNSName}'
-                      ParentInstanceIP = '$${ParentInstanceIP}'
                       ServerNetBIOSName = '$${ServerNetBIOSName}'
                       ServerRole = 'DomainController'
                       StackName = 'instance-onprem-child-dc-${var.onprem_child_dc_random_string}'
@@ -272,9 +270,9 @@ resource "aws_cloudformation_stack" "instance_child_dc" {
                   </powershell>
               - AdministratorSecretName: !Ref OnPremAdministratorSecret
                 DomainDNSName: !Join [ '.', [ !Ref OnpremChildNetBiosName, !Ref OnpremDomainName ] ]
+                DomainDNSResolutionIP: !Ref DomainDNSResolutionIP
                 DomainNetBIOSName: !Ref OnpremChildNetBiosName
                 ParentDomainDNSName: !Ref OnpremDomainName
-                ParentInstanceIP: !Ref ParentInstanceIP
                 ServerNetBIOSName: !Ref ServerNetBIOSName
                 VPCCIDR: !Ref VPCCIDR
     Outputs:

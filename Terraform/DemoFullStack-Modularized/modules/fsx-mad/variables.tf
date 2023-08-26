@@ -22,13 +22,18 @@ variable "fsx_mad_directory_id" {
   type        = string
 }
 
-variable "fsx_mad_kms_key" {
-  description = "ARN for the KMS Key to encrypt the file system at rest."
+variable "fsx_mad_directory_netbios_name" {
+  description = "The NetBIOS name for the directory, such as CORP."
   type        = string
 }
 
 variable "fsx_mad_random_string" {
   description = "Random string to ensure resource names are unique."
+  type        = string
+}
+
+variable "fsx_mad_setup_secret_arn" {
+  description = "Secret ARN of Secret containing credentials to setup the FSx Filesystem."
   type        = string
 }
 
@@ -58,5 +63,25 @@ variable "fsx_mad_throughput_capacity" {
 
 variable "fsx_mad_vpc_id" {
   description = "VPC ID the Amazon FSx for Windows File System will be deployed to."
+  type        = string
+}
+
+variable "setup_ec2_iam_role" {
+  description = "IAM role attached to SSM Target EC2 instance."
+  type        = string
+}
+
+variable "setup_secret_arn" {
+  description = "Secret ARN of Secret containing credentials to setup the FSx Filesystem."
+  type        = string
+}
+
+variable "setup_secret_kms_key_arn" {
+  description = "KMS Key ARN used to encrypt Secret containing credentials to setup the FSx Filesystem."
+  type        = string
+}
+
+variable "setup_ssm_target_instance_id" {
+  description = "SSM Target EC2 instance ID."
   type        = string
 }

@@ -50,7 +50,7 @@ data "aws_iam_policy_document" "ec2" {
     resources = [var.mad_mgmt_admin_secret]
   }
   statement {
-    actions   = ["ec2:DescribeInstances", "ec2:DescribeSecurityGroups", "ssm:DescribeInstanceInformation", "ssm:GetAutomationExecution", "ssm:ListCommands", "ssm:ListCommandInvocations", "ds:CreateConditionalForwarder", "ds:CreateTrust", "ds:DescribeTrusts", "ds:VerifyTrust"]
+    actions   = ["ec2:DescribeInstances", "ssm:DescribeInstanceInformation", "ssm:GetAutomationExecution", "ssm:ListCommands", "ssm:ListCommandInvocations"]
     effect    = "Allow"
     resources = ["*"]
   }
@@ -113,9 +113,8 @@ resource "aws_iam_instance_profile" "ec2" {
 }
 
 resource "aws_iam_role_policy" "kms" {
-  name  = "kms-policy"
-  count = var.mad_mgmt_use_customer_managed_key ? 1 : 0
-  role  = aws_iam_role.ec2.id
+  name = "kms-policy"
+  role = aws_iam_role.ec2.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -133,7 +132,6 @@ resource "aws_iam_role_policy" "kms" {
 }
 
 resource "aws_kms_grant" "kms_admin_secret" {
-  count             = var.mad_mgmt_use_customer_managed_key ? 1 : 0
   name              = "kms-decrypt-secret-grant-mad-mgmt"
   key_id            = data.aws_kms_key.kms.id
   grantee_principal = aws_iam_role.ec2.arn
@@ -143,20 +141,21 @@ resource "aws_kms_grant" "kms_admin_secret" {
 resource "aws_cloudformation_stack" "instance_mad_mgmt" {
   name = "instance-mad-mgmt-${var.mad_mgmt_random_string}"
   parameters = {
-    AMI               = data.aws_ami.ami.id
-    DeployMadPki      = tostring(var.mad_mgmt_deploy_pki)
-    EbsKmsKey         = var.mad_mgmt_ebs_kms_key
-    InstanceProfile   = aws_iam_instance_profile.ec2.id
-    InstanceType      = var.mad_mgmt_ec2_instance_type
-    LaunchTemplate    = var.mad_mgmt_ec2_launch_template
-    MadAdminSecret    = var.mad_mgmt_admin_secret
-    MadDomainName     = var.mad_mgmt_domain_fqdn
-    MadNetBiosName    = var.mad_mgmt_domain_netbios
-    SecurityGroupId   = var.mad_mgmt_security_group_id
-    ServerNetBIOSName = var.mad_mgmt_server_netbios_name
-    SsmAutoDocument   = var.mad_mgmt_ssm_docs[0]
-    SubnetId          = var.mad_mgmt_subnet_id
-    VPCCIDR           = var.mad_mgmt_vpc_cidr
+    AMI                   = data.aws_ami.ami.id
+    DeployMadPki          = tostring(var.mad_mgmt_deploy_pki)
+    DomainDNSResolutionIP = join(",", var.mad_mgmt_dns_resolver_ip)
+    EbsKmsKey             = var.mad_mgmt_ebs_kms_key
+    InstanceProfile       = aws_iam_instance_profile.ec2.id
+    InstanceType          = var.mad_mgmt_ec2_instance_type
+    LaunchTemplate        = var.mad_mgmt_ec2_launch_template
+    MadAdminSecret        = var.mad_mgmt_admin_secret
+    MadDomainName         = var.mad_mgmt_domain_fqdn
+    MadNetBiosName        = var.mad_mgmt_domain_netbios
+    SecurityGroupId       = var.mad_mgmt_security_group_id
+    ServerNetBIOSName     = var.mad_mgmt_server_netbios_name
+    SsmAutoDocument       = var.mad_mgmt_ssm_docs[0]
+    SubnetId              = var.mad_mgmt_subnet_id
+    VPCCIDR               = var.mad_mgmt_vpc_cidr
   }
 
   template_body = <<STACK
@@ -171,6 +170,9 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
           - 'true'
           - 'false'
         Description: Deploy Enterpise Ca with AWS Managed Microsoft AD
+        Type: String
+      DomainDNSResolutionIP:
+        Description: IP Address(s) of DNS resolver
         Type: String
       EbsKmsKey:
         Description: Alias for the KMS encryption key used to encrypt the EBS volumes
@@ -271,6 +273,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
                       AdministratorSecretName = '$${AdministratorSecretName}'
                       DeployPki = $DeployPki
                       DeploymentType = $DeploymentType
+                      DomainDNSResolutionIP = '$${DomainDNSResolutionIP}'
                       DomainDNSName = '$${DomainDNSName}'
                       DomainNetBIOSName = '$${DomainNetBIOSName}'
                       DomainType = 'AWSManagedAD'
@@ -285,6 +288,7 @@ resource "aws_cloudformation_stack" "instance_mad_mgmt" {
               - AdministratorSecretName: !Ref MadAdminSecret 
                 DeployMadPki: !Ref DeployMadPki
                 DomainDNSName: !Ref MadDomainName
+                DomainDNSResolutionIP: !Ref DomainDNSResolutionIP
                 DomainNetBIOSName: !Ref MadNetBiosName
                 ServerNetBIOSName: !Ref ServerNetBIOSName
                 VPCCIDR: !Ref VPCCIDR

@@ -125,9 +125,16 @@ resource "aws_internet_gateway" "main" {
 
 resource "aws_default_route_table" "main" {
   default_route_table_id = aws_vpc.main.default_route_table_id
-  route = []
+  route                  = []
   tags = {
     Name = "VPC-RT-Default-${var.vpc_name}-${var.vpc_random_string}"
+  }
+}
+
+resource "aws_default_security_group" "main" {
+  vpc_id = aws_vpc.main.id
+  tags = {
+    Name = "Do-Not-Use-${var.vpc_name}-${var.vpc_random_string}"
   }
 }
 

@@ -32,16 +32,6 @@ variable "ec2_ami_owner" {
   type        = string
 }
 
-variable "ebs_kms_key" {
-  description = "Alias for the KMS encryption key used to encrypt the EBS volumes."
-  type        = string
-}
-
-variable "fsx_kms_key" {
-  description = "Alias for the KMS Key to encrypt the file system at rest."
-  type        = string
-}
-
 variable "fsx_mad_alias" {
   description = "DNS alias name that you want to associate with the Amazon FSx file system."
   type        = string
@@ -166,19 +156,9 @@ variable "onprem_child_domain_netbios" {
   type        = string
 }
 
-variable "onprem_root_dc_adc_svc_username" {
-  description = "The user name for the service account on your self-managed AD domain for AD Connector."
-  type        = string
-}
-
 variable "onprem_root_additional_dc_server_netbios_name" {
   description = "The NetBIOS name for the server, such as Additional-DC01."
   type        = string
-}
-
-variable "onprem_root_dc_deploy_adc" {
-  description = "Deploy AD Connector integrated with onpremises AD."
-  type        = bool
 }
 
 variable "onprem_root_dc_deploy_fsx" {
@@ -193,11 +173,6 @@ variable "onprem_root_dc_domain_fqdn" {
 
 variable "onprem_root_dc_domain_netbios" {
   description = "The fully qualified name for the domain, such as onpremises.local."
-  type        = string
-}
-
-variable "onprem_root_dc_fsx_svc_username" {
-  description = "The user name for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain."
   type        = string
 }
 
@@ -251,11 +226,6 @@ variable "rds_instance_class" {
   type        = string
 }
 
-variable "rds_kms_key" {
-  description = "Alias for the KMS encryption key."
-  type        = string
-}
-
 variable "rds_port_number" {
   description = "RDS SQL Intance integrated with AWS Managed Microsoft AD port number."
   type        = number
@@ -272,11 +242,6 @@ variable "rds_storage_type" {
 
 variable "rds_username" {
   description = "Username for the master DB user."
-  type        = string
-}
-
-variable "secret_kms_key" {
-  description = "Alias for the KMS encryption key used to encrypt Secrets."
   type        = string
 }
 
@@ -318,11 +283,6 @@ variable "ssm_association_max_concurrency" {
 variable "ssm_association_max_errors" {
   description = "The maximum number of errors allowed before this task stops being scheduled."
   type        = string
-}
-
-variable "use_customer_managed_keys" {
-  description = "Create and use Customer Managed KMS Keys (CMK) for encryption"
-  type        = bool
 }
 
 variable "vpc_cidr_primary" {

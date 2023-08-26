@@ -10,7 +10,7 @@ variable "fsx_self_automatic_backup_retention_days" {
 
 variable "fsx_self_deployment_type" {
   description = "Specifies the file system deployment type, valid values are MULTI_AZ_1, SINGLE_AZ_1 and SINGLE_AZ_2."
-  type = string
+  type        = string
   validation {
     condition     = contains(["MULTI_AZ_1", "SINGLE_AZ_1", "SINGLE_AZ_2"], var.fsx_self_deployment_type)
     error_message = "The storage type value must be MULTI_AZ_1, SINGLE_AZ_1, or SINGLE_AZ_2"
@@ -27,13 +27,13 @@ variable "fsx_self_domain_fqdn" {
   type        = string
 }
 
-variable "fsx_self_file_system_administrators_group" {
-  description = "The name of the domain group whose members are granted administrative privileges for the file system."
+variable "fsx_self_domain_netbios_name" {
+  description = "The short name of the directory, such as CORP."
   type        = string
 }
 
-variable "fsx_self_kms_key" {
-  description = "ARN for the KMS Key to encrypt the file system at rest"
+variable "fsx_self_file_system_administrators_group" {
+  description = "The name of the domain group whose members are granted administrative privileges for the file system."
   type        = string
 }
 
@@ -42,14 +42,18 @@ variable "fsx_self_parent_ou_dn" {
   type        = string
 }
 
-variable "fsx_self_password_secret" {
-  description = "The password for the service account on your self-managed AD domain that Amazon FSx will use to join to your AD domain."
-  type        = string
-}
-
 variable "fsx_self_random_string" {
   description = "Random string to ensure resource names are unique."
   type        = string
+}
+
+variable "fsx_self_run_location" {
+  description = "What type of Windows Server will the create FSx alias DNS record SSM Run Command run against, DomainController or MemberServer."
+  type        = string
+  validation {
+    condition     = contains(["DomainController", "MemberServer"], var.fsx_self_run_location)
+    error_message = "The value must be DomainController or MemberServer."
+  }
 }
 
 variable "fsx_self_storage_capacity" {
@@ -83,5 +87,25 @@ variable "fsx_self_username" {
 
 variable "fsx_self_vpc_id" {
   description = "VPC ID the Amazon FSx for Windows File System will be deployed to."
+  type        = string
+}
+
+variable "setup_ec2_iam_role" {
+  description = "IAM role attached to SSM Target EC2 instance."
+  type        = string
+}
+
+variable "setup_secret_arn" {
+  description = "Secret ARN of Secret containing credentials to setup the FSx Filesystem."
+  type        = string
+}
+
+variable "setup_secret_kms_key_arn" {
+  description = "KMS Key ARN used to encrypt Secret containing credentials to setup the FSx Filesystem."
+  type        = string
+}
+
+variable "setup_ssm_target_instance_id" {
+  description = "SSM Target EC2 instance ID."
   type        = string
 }

@@ -63,11 +63,6 @@ variable "onprem_child_dc_subnet_id" {
   type        = string
 }
 
-variable "onprem_child_dc_use_customer_managed_key" {
-  description = "Create and use Customer Managed KMS Keys (CMK) for encryption"
-  type        = bool
-}
-
 variable "onprem_child_dc_vpc_cidr" {
   description = "VPC CIDR the instance will be deployed to."
   type        = string
@@ -78,9 +73,9 @@ variable "onprem_child_domain_netbios" {
   type        = string
 }
 
-variable "onprem_dc_ip" {
+variable "onprem_domain_dns_resolver_ip" {
   description = "IP of exisiting domain controller for DNS resolution of parent domain."
-  type        = string
+  type        = list(string)
 }
 
 variable "onprem_domain_fqdn" {
