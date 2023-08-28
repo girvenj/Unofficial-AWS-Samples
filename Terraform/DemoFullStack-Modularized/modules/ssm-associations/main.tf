@@ -324,6 +324,8 @@ resource "aws_ssm_association" "software-inventory" {
   apply_only_at_cron_interval = false
   association_name            = "Gather-Software-Inventory-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity         = "CRITICAL"
+  max_concurrency             = "100%"
+  max_errors                  = "100%"
   name                        = "AWS-GatherSoftwareInventory"
   parameters = {
     applications                = "Enabled"
@@ -347,6 +349,8 @@ resource "aws_ssm_association" "patching" {
   apply_only_at_cron_interval = true
   association_name            = "Run-Patch-Baseline-DailyCheck-${var.ssm_association_random_string}"
   compliance_severity         = "CRITICAL"
+  max_concurrency             = var.ssm_association_max_concurrency
+  max_errors                  = var.ssm_association_max_errors
   name                        = "AWS-RunPatchBaseline"
   parameters = {
     Operation    = "Install"
