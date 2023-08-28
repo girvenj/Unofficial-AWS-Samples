@@ -13,6 +13,11 @@ variable "onprem_root_dc_domain_netbios" {
   type        = string
 }
 
+variable "onprem_root_dc_ebs_kms_key" {
+  description = "Alias for the KMS encryption key used to encrypt the EBS volumes."
+  type        = string
+}
+
 variable "onprem_root_dc_ec2_ami_name" {
   description = "Name of the AMI that was provided during image creation."
   type        = string

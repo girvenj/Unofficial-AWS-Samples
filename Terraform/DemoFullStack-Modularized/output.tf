@@ -70,10 +70,6 @@ output "onprem_root_ad_domain_name" {
   value = module.onprem_root_dc_instance.onprem_ad_domain_name
 }
 
-output "onprem_root_ad_ebs_kms_key_arn" {
-  value = module.onprem_root_dc_instance.onprem_ad_ebs_kms_key_arn
-}
-
 output "onprem_root_ad_instance_id" {
   value = module.onprem_root_dc_instance.onprem_ad_instance_id
 }

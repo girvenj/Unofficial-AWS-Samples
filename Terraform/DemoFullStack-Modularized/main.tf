@@ -487,11 +487,24 @@ module "pki_security_group_secondary" {
   vpc_id      = module.network_secondary.vpc_id
 }
 
+module "kms_ebs_key" {
+  source                          = "./modules/kms"
+  kms_key_description             = "KMS key for EBS encryption"
+  kms_key_usage                   = "ENCRYPT_DECRYPT"
+  kms_customer_master_key_spec    = "SYMMETRIC_DEFAULT"
+  kms_key_deletion_window_in_days = 7
+  kms_enable_key_rotation         = true
+  kms_key_alias_name              = "ebs-key"
+  kms_multi_region                = false
+  kms_random_string               = random_string.random_string.result
+}
+
 module "onprem_root_dc_instance" {
   source                             = "./modules/ec2-root-dc"
   onprem_root_dc_deploy_fsx          = var.onprem_root_dc_deploy_fsx
   onprem_root_dc_domain_fqdn         = var.onprem_root_dc_domain_fqdn
   onprem_root_dc_domain_netbios      = var.onprem_root_dc_domain_netbios
+  onprem_root_dc_ebs_kms_key         = module.kms_ebs_key.kms_alias_name
   onprem_root_dc_ec2_ami_name        = var.ec2_ami_name
   onprem_root_dc_ec2_ami_owner       = var.ec2_ami_owner
   onprem_root_dc_ec2_instance_type   = var.default_ec2_instance_type
@@ -530,7 +543,7 @@ module "mad_mgmt_instance" {
   mad_mgmt_ec2_ami_owner        = var.ec2_ami_owner
   mad_mgmt_ec2_instance_type    = var.default_ec2_instance_type
   mad_mgmt_ec2_launch_template  = aws_launch_template.main.id
-  mad_mgmt_ebs_kms_key          = module.onprem_root_dc_instance.onprem_ad_ebs_kms_key_alias_name
+  mad_mgmt_ebs_kms_key          = module.kms_ebs_key.kms_alias_name
   mad_mgmt_patch_group_tag      = "${var.patch_group_tag}-${random_string.random_string.result}"
   mad_mgmt_random_string        = random_string.random_string.result
   mad_mgmt_security_group_id    = module.ms_security_group_primary.sg_id
@@ -574,7 +587,7 @@ module "onprem_pki_instance" {
   onprem_domain_fqdn                  = module.onprem_root_dc_instance.onprem_ad_domain_name
   onprem_domain_netbios               = module.onprem_root_dc_instance.onprem_ad_netbios_name
   onprem_pki_dns_resolver_ip          = [module.onprem_root_dc_instance.onprem_ad_ip]
-  onprem_pki_ebs_kms_key              = module.onprem_root_dc_instance.onprem_ad_ebs_kms_key_alias_name
+  onprem_pki_ebs_kms_key              = module.kms_ebs_key.kms_alias_name
   onprem_pki_ec2_ami_name             = var.ec2_ami_name
   onprem_pki_ec2_ami_owner            = var.ec2_ami_owner
   onprem_pki_ec2_instance_type        = var.default_ec2_instance_type
@@ -594,7 +607,7 @@ module "onprem_child_dc_instance" {
   onprem_administrator_secret_kms_key = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
   onprem_domain_dns_resolver_ip       = [module.onprem_root_dc_instance.onprem_ad_ip]
   onprem_domain_fqdn                  = module.onprem_root_dc_instance.onprem_ad_domain_name
-  onprem_child_dc_ebs_kms_key         = module.onprem_root_dc_instance.onprem_ad_ebs_kms_key_alias_name
+  onprem_child_dc_ebs_kms_key         = module.kms_ebs_key.kms_alias_name
   onprem_child_dc_ec2_ami_name        = var.ec2_ami_name
   onprem_child_dc_ec2_ami_owner       = var.ec2_ami_owner
   onprem_child_dc_ec2_instance_type   = var.default_ec2_instance_type
@@ -626,7 +639,7 @@ module "onprem_additional_root_dc_instance" {
   onprem_domain_dns_resolver_ip            = [module.onprem_root_dc_instance.onprem_ad_ip]
   onprem_domain_fqdn                       = module.onprem_root_dc_instance.onprem_ad_domain_name
   onprem_domain_netbios                    = module.onprem_root_dc_instance.onprem_ad_netbios_name
-  onprem_additional_dc_ebs_kms_key         = module.onprem_root_dc_instance.onprem_ad_ebs_kms_key_alias_name
+  onprem_additional_dc_ebs_kms_key         = module.kms_ebs_key.kms_alias_name
   onprem_additional_dc_ec2_ami_name        = var.ec2_ami_name
   onprem_additional_dc_ec2_ami_owner       = var.ec2_ami_owner
   onprem_additional_dc_ec2_instance_type   = var.default_ec2_instance_type

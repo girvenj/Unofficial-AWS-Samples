@@ -123,18 +123,6 @@ module "kms_key" {
   kms_random_string               = var.onprem_root_dc_random_string
 }
 
-module "kms_ebs_key" {
-  source                          = "../kms"
-  kms_key_description             = "KMS key for EBS encryption"
-  kms_key_usage                   = "ENCRYPT_DECRYPT"
-  kms_customer_master_key_spec    = "SYMMETRIC_DEFAULT"
-  kms_key_deletion_window_in_days = 7
-  kms_enable_key_rotation         = true
-  kms_key_alias_name              = "ebs-key"
-  kms_multi_region                = false
-  kms_random_string               = var.onprem_root_dc_random_string
-}
-
 resource "aws_kms_grant" "kms_administrator_secret" {
   name              = "kms-decrypt-secret-grant-onpremises-root-dc"
   key_id            = module.kms_key.kms_key_id
@@ -182,7 +170,7 @@ resource "aws_cloudformation_stack" "instance_root_dc" {
   name = "instance-onpremises-root-dc-${var.onprem_root_dc_random_string}"
   parameters = {
     AMI                       = data.aws_ami.ami.id
-    EbsKmsKey                 = module.kms_ebs_key.kms_alias_name
+    EbsKmsKey                 = var.onprem_root_dc_ebs_kms_key
     InstanceProfile           = aws_iam_instance_profile.ec2.id
     InstanceType              = var.onprem_root_dc_ec2_instance_type
     LaunchTemplate            = var.onprem_root_dc_ec2_launch_template

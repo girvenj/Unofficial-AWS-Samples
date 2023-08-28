@@ -2,14 +2,6 @@ output "onprem_ad_domain_name" {
   value = aws_cloudformation_stack.instance_root_dc.parameters.OnpremDomainName
 }
 
-output "onprem_ad_ebs_kms_key_alias_name" {
-  value = module.kms_ebs_key.kms_alias_name
-}
-
-output "onprem_ad_ebs_kms_key_arn" {
-  value = module.kms_ebs_key.kms_key_arn
-}
-
 output "onprem_ad_iam_role_name" {
   value = aws_iam_role.ec2.name 
 }

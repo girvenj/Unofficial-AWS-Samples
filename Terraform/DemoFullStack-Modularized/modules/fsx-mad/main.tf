@@ -46,7 +46,7 @@ module "kms_key" {
   kms_customer_master_key_spec    = "SYMMETRIC_DEFAULT"
   kms_key_deletion_window_in_days = 7
   kms_enable_key_rotation         = true
-  kms_key_alias_name              = "fsx-mad-secret-kms-key"
+  kms_key_alias_name              = "fsx-mad-kms-key"
   kms_multi_region                = false
   kms_random_string               = var.fsx_mad_random_string
 }
