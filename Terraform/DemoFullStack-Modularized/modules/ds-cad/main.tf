@@ -362,6 +362,7 @@ resource "aws_ssm_document" "main" {
                   Try {
                       [System.GUID]$ServicePrincipalNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'servicePrincipalName' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
                       [System.GUID]$ComputerNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'computer' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
+                      [System.GUID]$CertificationAuthorityGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'certificationAuthority' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
                   } Catch [System.Exception] {
                       Write-Output "Failed to get Schema GUIDs $_"
                       Exit 1
@@ -383,6 +384,7 @@ resource "aws_ssm_document" "main" {
 
                   $IdentityReference = $User | Select-Object -ExpandProperty 'SID'
                   $AccountDn = $User | Select-Object -ExpandProperty 'DistinguishedName'
+                  $NullGuid = [System.GUID]'00000000-0000-0000-0000-000000000000'
 
                   $AclRules = @(
                       @{
@@ -402,8 +404,53 @@ resource "aws_ssm_document" "main" {
                               ObjectGUID                         = $ComputerNameGuid
                               ActiveDirectorySecurityInheritance = 'All'
                           }
+                      },
+                      @{
+                          Path = "CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
+                          Acl  = @{
+                              ActiveDirectoryRights              = 'ReadProperty,WriteProperty,CreateChild,DeleteChild'
+                              AccessControlType                  = 'Allow'
+                              ObjectGUID                         = $CertificationAuthorityGuid
+                              ActiveDirectorySecurityInheritance = 'None'
+                          }
+                      },
+                      @{
+                          Path = "CN=AIA,CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
+                          Acl  = @{
+                              ActiveDirectoryRights              = 'ReadProperty,WriteProperty,CreateChild,DeleteChild'
+                              AccessControlType                  = 'Allow'
+                              ObjectGUID                         = $CertificationAuthorityGuid
+                              ActiveDirectorySecurityInheritance = 'None'
+                          }
+                      },
+                      @{
+                          Path = "CN=Certification Authorities,CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
+                          Acl  = @{
+                              ActiveDirectoryRights              = 'ReadProperty,WriteProperty,CreateChild,DeleteChild'
+                              AccessControlType                  = 'Allow'
+                              ObjectGUID                         = $CertificationAuthorityGuid
+                              ActiveDirectorySecurityInheritance = 'None'
+                          }
+                      },
+                      @{
+                          Path = "CN=NTAuthCertificates,CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
+                          Acl  = @{
+                              ActiveDirectoryRights              = 'ReadProperty,WriteProperty'
+                              AccessControlType                  = 'Allow'
+                              ObjectGUID                         = $NullGuid
+                              ActiveDirectorySecurityInheritance = 'None'
+                          }
                       }
                   )
+
+                  If (-Not (Test-Path -Path "AD:\CN=NTAuthCertificates,CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)")) {
+                      Try {
+                          New-ADObject -Name 'NTAuthCertificates' -Type 'container' -Path "CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)" -ErrorAction Stop
+                      } Catch [System.Exception] {
+                          Write-Output "Failed to create NTAuthCertificates container $_"
+                          Exit 1
+                      }
+                  }
 
                   Foreach ($AclRule in $AclRules) {
                       Add-OuAcl -AclPath $AclRule.Path -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.Acl.ActiveDirectoryRights -AccessControlType $AclRule.Acl.AccessControlType -ObjectGUID $AclRule.Acl.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.Acl.ActiveDirectorySecurityInheritance

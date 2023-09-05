@@ -265,15 +265,23 @@ resource "aws_launch_template" "main" {
   }
 }
 
-resource "aws_launch_template" "secondary" {
-  provider = aws.secondary
-  name      = "Metadata-Config-Launch-Template-${random_string.random_string.result}"
-  metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"
-    http_put_response_hop_limit = 2
-    instance_metadata_tags      = "enabled"
-  }
+module "ssm_docs" {
+  source                 = "./modules/ssm-docs"
+  ssm_docs_random_string = random_string.random_string.result
+}
+
+module "ssm_updates_software" {
+  source                                       = "./modules/ssm-associations"
+  ssm_association_approve_after_days           = var.ssm_association_approve_after_days
+  ssm_association_driver_deployment_rate       = var.ssm_association_driver_deployment_rate
+  ssm_association_launch_agent_deployment_rate = var.ssm_association_launch_agent_deployment_rate
+  ssm_association_patching_deployment_rate     = var.ssm_association_patching_deployment_rate
+  ssm_association_ssm_agent_deployment_rate    = var.ssm_association_ssm_agent_deployment_rate
+  ssm_association_inventory_rate               = var.ssm_association_inventory_rate
+  ssm_association_max_concurrency              = var.ssm_association_max_concurrency
+  ssm_association_max_errors                   = var.ssm_association_max_errors
+  ssm_association_patch_group_tag              = "${var.patch_group_tag}-${random_string.random_string.result}"
+  ssm_association_random_string                = random_string.random_string.result
 }
 
 module "network" {
@@ -283,51 +291,28 @@ module "network" {
   vpc_random_string = random_string.random_string.result
 }
 
-module "mad_trust" {
-  source                                                = "./modules/ds-mad-trust"
-  mad_trust_directory_id                                = module.managed_ad.managed_ad_id
-  mad_trust_mad_domain_dns_name                         = var.mad_domain_fqdn
-  mad_trust_mad_domain_resolver                         = module.managed_ad.managed_ad_ips
-  mad_trust_onpremises_domain_dns_name                  = var.onprem_root_dc_domain_fqdn
-  mad_trust_onpremises_domain_netbios_name              = var.onprem_root_dc_domain_netbios
-  mad_trust_onpremises_domain_resolver                  = [module.onprem_root_dc_instance.onprem_ad_ip]
-  mad_trust_direction                                   = var.mad_trust_direction
-  mad_trust_secret_arn                                  = module.managed_ad.managed_ad_password_secret_arn
-  mad_trust_secret_kms_key_arn                          = module.managed_ad.managed_ad_password_secret_kms_key_arn
-  mad_trust_random_string                               = random_string.random_string.result
-  mad_trust_onpremises_administrator_secret_arn         = module.onprem_root_dc_instance.onprem_ad_password_secret_arn
-  mad_trust_onpremises_administrator_secret_kms_key_arn = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
-  mad_trust_ssm_target_iam_role                         = module.onprem_root_dc_instance.onprem_ad_iam_role_name
-  mad_trust_ssm_target_instance_id                      = module.onprem_root_dc_instance.onprem_ad_instance_id
+module "ad_security_group_primary" {
+  source      = "./modules/vpc-security-group-ingress"
+  description = "AD-Server-Security Group"
+  name        = "AD-Server-Security-Group-${random_string.random_string.result}"
+  ports       = local.ad_ports
+  vpc_id      = module.network.vpc_id
 }
 
-module "network_secondary" {
-  source            = "./modules/vpc-core"
-  providers         = { aws = aws.secondary }
-  vpc_cidr          = var.vpc_cidr_secondary
-  vpc_name          = var.vpc_name_secondary
-  vpc_random_string = random_string.random_string.result
+module "ms_security_group_primary" {
+  source      = "./modules/vpc-security-group-ingress"
+  description = "Member Server Security Group"
+  name        = "Member-Server-Security-Group-${random_string.random_string.result}"
+  ports       = local.ms_ports
+  vpc_id      = module.network.vpc_id
 }
 
-module "network_peer" {
-  providers = {
-    aws.primary   = aws.primary
-    aws.secondary = aws.secondary
-  }
-  source             = "./modules/vpc-peer"
-  peer_region        = var.aws_region_secondary
-  peer_vpc_cidr      = module.network_secondary.vpc_cidr
-  peer_vpc_id        = module.network_secondary.vpc_id
-  peer_vpc_nat1_rt   = module.network_secondary.nat1_route_table_id
-  peer_vpc_nat2_rt   = module.network_secondary.nat2_route_table_id
-  peer_vpc_nat3_rt   = module.network_secondary.nat3_route_table_id
-  peer_vpc_public_rt = module.network_secondary.public_route_table_id
-  vpc_cidr           = module.network.vpc_cidr
-  vpc_id             = module.network.vpc_id
-  vpc_nat1_rt        = module.network.nat1_route_table_id
-  vpc_nat2_rt        = module.network.nat2_route_table_id
-  vpc_nat3_rt        = module.network.nat3_route_table_id
-  vpc_public_rt      = module.network.public_route_table_id
+module "pki_security_group_primary" {
+  source      = "./modules/vpc-security-group-ingress"
+  description = "PKI Server Security Group"
+  name        = "PKI-Server-Security-Group-${random_string.random_string.result}"
+  ports       = local.pki_ports
+  vpc_id      = module.network.vpc_id
 }
 
 module "r53_outbound_resolver" {
@@ -350,39 +335,44 @@ module "managed_ad" {
   mad_vpc_id                               = module.network.vpc_id
 }
 
-module "connect_ad" {
-  source                       = "./modules/ds-cad"
-  cad_dns_ips                  = [module.onprem_root_dc_instance.onprem_ad_ip]
-  cad_domain_fqdn              = module.onprem_root_dc_instance.onprem_ad_domain_name
-  cad_domain_netbios_name      = module.onprem_root_dc_instance.onprem_ad_netbios_name
-  cad_parent_ou_dn             = "DC=onpremises,DC=local"
-  cad_random_string            = random_string.random_string.result
-  cad_svc_username             = "adc_svc"
-  cad_size                     = var.cad_size
-  cad_subnet_ids               = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
-  cad_vpc_id                   = module.network.vpc_id
-  setup_ec2_iam_role           = module.onprem_root_dc_instance.onprem_ad_iam_role_name
-  setup_secret_arn             = module.onprem_root_dc_instance.onprem_ad_password_secret_arn
-  setup_secret_kms_key_arn     = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
-  setup_ssm_target_instance_id = module.onprem_root_dc_instance.onprem_ad_instance_id
+module "mad_trust" {
+  source                                                = "./modules/ds-mad-trust"
+  mad_trust_directory_id                                = module.managed_ad.managed_ad_id
+  mad_trust_mad_domain_dns_name                         = var.mad_domain_fqdn
+  mad_trust_mad_domain_resolver                         = module.managed_ad.managed_ad_ips
+  mad_trust_onpremises_domain_dns_name                  = var.onprem_root_dc_domain_fqdn
+  mad_trust_onpremises_domain_netbios_name              = var.onprem_root_dc_domain_netbios
+  mad_trust_onpremises_domain_resolver                  = [module.onprem_root_dc_instance.onprem_ad_ip]
+  mad_trust_direction                                   = var.mad_trust_direction
+  mad_trust_secret_arn                                  = module.managed_ad.managed_ad_password_secret_arn
+  mad_trust_secret_kms_key_arn                          = module.managed_ad.managed_ad_password_secret_kms_key_arn
+  mad_trust_random_string                               = random_string.random_string.result
+  mad_trust_onpremises_administrator_secret_arn         = module.onprem_root_dc_instance.onprem_ad_password_secret_arn
+  mad_trust_onpremises_administrator_secret_kms_key_arn = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
+  mad_trust_ssm_target_iam_role                         = module.onprem_root_dc_instance.onprem_ad_iam_role_name
+  mad_trust_ssm_target_instance_id                      = module.onprem_root_dc_instance.onprem_ad_instance_id
 }
 
-module "managed_ad_new_region" {
-  providers = {
-    aws.primary   = aws.primary
-    aws.secondary = aws.secondary
-  }
-  source                                              = "./modules/ds-mad-new-region"
-  mad_new_region_desired_number_of_domain_controllers = var.mad_desired_number_of_domain_controllers
-  mad_new_region_directory_id                         = module.managed_ad.managed_ad_id
-  mad_new_region_domain_fqdn                          = var.mad_domain_fqdn
-  mad_new_region_random_string                        = random_string.random_string.result
-  mad_new_region_region_name                          = var.aws_region_secondary
-  mad_new_region_subnet_ids                           = [module.network_secondary.nat_subnet1_id, module.network_secondary.nat_subnet2_id]
-  mad_new_region_vpc_id                               = module.network_secondary.vpc_id
-  depends_on = [
-    module.fsx_mad
-  ]
+module "mad_mgmt_instance" {
+  source                        = "./modules/ec2-mgmt"
+  mad_mgmt_admin_secret         = module.managed_ad.managed_ad_password_secret_id
+  mad_mgmt_admin_secret_kms_key = module.managed_ad.managed_ad_password_secret_kms_alias_name
+  mad_mgmt_deploy_pki           = true
+  mad_mgmt_dns_resolver_ip      = module.managed_ad.managed_ad_ips
+  mad_mgmt_domain_fqdn          = module.managed_ad.managed_ad_domain_name
+  mad_mgmt_domain_netbios       = module.managed_ad.managed_ad_netbios_name
+  mad_mgmt_ec2_ami_name         = var.ec2_ami_name
+  mad_mgmt_ec2_ami_owner        = var.ec2_ami_owner
+  mad_mgmt_ec2_instance_type    = var.default_ec2_instance_type
+  mad_mgmt_ec2_launch_template  = aws_launch_template.main.id
+  mad_mgmt_ebs_kms_key          = module.kms_ebs_key.kms_alias_name
+  mad_mgmt_patch_group_tag      = "${var.patch_group_tag}-${random_string.random_string.result}"
+  mad_mgmt_random_string        = random_string.random_string.result
+  mad_mgmt_security_group_id    = module.pki_security_group_primary.sg_id
+  mad_mgmt_server_netbios_name  = var.mad_mgmt_server_netbios_name
+  mad_mgmt_ssm_docs             = [module.ssm_docs.ssm_initial_doc_name, module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
+  mad_mgmt_subnet_id            = module.network.nat_subnet1_id
+  mad_mgmt_vpc_cidr             = module.network.vpc_cidr
 }
 
 module "r53_outbound_resolver_rule_mad" {
@@ -431,62 +421,6 @@ module "rds_mad" {
   rds_vpc_id            = module.network.vpc_id
 }
 
-module "ssm_docs" {
-  source                 = "./modules/ssm-docs"
-  ssm_docs_random_string = random_string.random_string.result
-}
-
-module "ad_security_group_primary" {
-  source      = "./modules/vpc-security-group-ingress"
-  description = "AD-Server-Security Group"
-  name        = "AD-Server-Security-Group-${random_string.random_string.result}"
-  ports       = local.ad_ports
-  vpc_id      = module.network.vpc_id
-}
-
-module "ms_security_group_primary" {
-  source      = "./modules/vpc-security-group-ingress"
-  description = "Member Server Security Group"
-  name        = "Member-Server-Security-Group-${random_string.random_string.result}"
-  ports       = local.ms_ports
-  vpc_id      = module.network.vpc_id
-}
-
-module "pki_security_group_primary" {
-  source      = "./modules/vpc-security-group-ingress"
-  description = "PKI Server Security Group"
-  name        = "PKI-Server-Security-Group-${random_string.random_string.result}"
-  ports       = local.pki_ports
-  vpc_id      = module.network.vpc_id
-}
-
-module "ad_security_group_secondary" {
-  source      = "./modules/vpc-security-group-ingress"
-  providers   = { aws = aws.secondary }
-  description = "AD-Server-Security Group"
-  name        = "AD-Server-Security-Group-${random_string.random_string.result}"
-  ports       = local.ad_ports
-  vpc_id      = module.network_secondary.vpc_id
-}
-
-module "ms_security_group_secondary" {
-  source      = "./modules/vpc-security-group-ingress"
-  providers   = { aws = aws.secondary }
-  description = "Member Server Security Group"
-  name        = "Member-Server-Security-Group-${random_string.random_string.result}"
-  ports       = local.ms_ports
-  vpc_id      = module.network_secondary.vpc_id
-}
-
-module "pki_security_group_secondary" {
-  source      = "./modules/vpc-security-group-ingress"
-  providers   = { aws = aws.secondary }
-  description = "PKI Server Security Group"
-  name        = "PKI-Server-Security-Group-${random_string.random_string.result}"
-  ports       = local.pki_ports
-  vpc_id      = module.network_secondary.vpc_id
-}
-
 module "kms_ebs_key" {
   source                          = "./modules/kms"
   kms_key_description             = "KMS key for EBS encryption"
@@ -521,6 +455,23 @@ module "onprem_root_dc_instance" {
   ]
 }
 
+module "connect_ad" {
+  source                       = "./modules/ds-cad"
+  cad_dns_ips                  = [module.onprem_root_dc_instance.onprem_ad_ip]
+  cad_domain_fqdn              = module.onprem_root_dc_instance.onprem_ad_domain_name
+  cad_domain_netbios_name      = module.onprem_root_dc_instance.onprem_ad_netbios_name
+  cad_parent_ou_dn             = "OU=AWS Applications,DC=onpremises,DC=local"
+  cad_random_string            = random_string.random_string.result
+  cad_svc_username             = "adc_svc"
+  cad_size                     = var.cad_size
+  cad_subnet_ids               = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
+  cad_vpc_id                   = module.network.vpc_id
+  setup_ec2_iam_role           = module.onprem_root_dc_instance.onprem_ad_iam_role_name
+  setup_secret_arn             = module.onprem_root_dc_instance.onprem_ad_password_secret_arn
+  setup_secret_kms_key_arn     = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
+  setup_ssm_target_instance_id = module.onprem_root_dc_instance.onprem_ad_instance_id
+}
+
 module "r53_outbound_resolver_rule_onprem_root" {
   source                            = "./modules/r53-outbound-resolver-rule"
   r53_rule_name                     = replace("${module.onprem_root_dc_instance.onprem_ad_domain_name}", ".", "-")
@@ -531,28 +482,6 @@ module "r53_outbound_resolver_rule_onprem_root" {
   r53_rule_vpc_id                   = module.network.vpc_id
 }
 
-module "mad_mgmt_instance" {
-  source                        = "./modules/ec2-mgmt"
-  mad_mgmt_admin_secret         = module.managed_ad.managed_ad_password_secret_id
-  mad_mgmt_admin_secret_kms_key = module.managed_ad.managed_ad_password_secret_kms_alias_name
-  mad_mgmt_deploy_pki           = true
-  mad_mgmt_dns_resolver_ip      = module.managed_ad.managed_ad_ips
-  mad_mgmt_domain_fqdn          = module.managed_ad.managed_ad_domain_name
-  mad_mgmt_domain_netbios       = module.managed_ad.managed_ad_netbios_name
-  mad_mgmt_ec2_ami_name         = var.ec2_ami_name
-  mad_mgmt_ec2_ami_owner        = var.ec2_ami_owner
-  mad_mgmt_ec2_instance_type    = var.default_ec2_instance_type
-  mad_mgmt_ec2_launch_template  = aws_launch_template.main.id
-  mad_mgmt_ebs_kms_key          = module.kms_ebs_key.kms_alias_name
-  mad_mgmt_patch_group_tag      = "${var.patch_group_tag}-${random_string.random_string.result}"
-  mad_mgmt_random_string        = random_string.random_string.result
-  mad_mgmt_security_group_id    = module.ms_security_group_primary.sg_id
-  mad_mgmt_server_netbios_name  = var.mad_mgmt_server_netbios_name
-  mad_mgmt_ssm_docs             = [module.ssm_docs.ssm_initial_doc_name, module.ssm_docs.ssm_baseline_doc_name, module.ssm_docs.ssm_auditpol_doc_name, module.ssm_docs.ssm_pki_doc_name]
-  mad_mgmt_subnet_id            = module.network.nat_subnet1_id
-  mad_mgmt_vpc_cidr             = module.network.vpc_cidr
-}
-
 module "fsx_onpremises" {
   source                                    = "./modules/fsx-self-managed"
   fsx_self_alias                            = var.fsx_self_alias
@@ -561,7 +490,7 @@ module "fsx_onpremises" {
   fsx_self_domain_fqdn                      = module.onprem_root_dc_instance.onprem_ad_domain_name
   fsx_self_domain_netbios_name              = module.onprem_root_dc_instance.onprem_ad_netbios_name
   fsx_self_dns_ips                          = [module.onprem_root_dc_instance.onprem_ad_ip]
-  fsx_self_parent_ou_dn                     = "DC=onpremises,DC=local"
+  fsx_self_parent_ou_dn                     = "OU=AWS Applications,DC=onpremises,DC=local"
   fsx_self_file_system_administrators_group = "FSxAdministrators"
   fsx_self_random_string                    = random_string.random_string.result
   fsx_self_run_location                     = "DomainController"
@@ -653,6 +582,17 @@ module "onprem_additional_root_dc_instance" {
   onprem_additional_dc_vpc_cidr            = module.network.vpc_cidr
 }
 
+resource "aws_launch_template" "secondary" {
+  provider = aws.secondary
+  name      = "Metadata-Config-Launch-Template-${random_string.random_string.result}"
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+    instance_metadata_tags      = "enabled"
+  }
+}
+
 module "ssm_updates_software_secondary" {
   source                                       = "./modules/ssm-associations"
   providers                                    = { aws = aws.secondary }
@@ -668,16 +608,76 @@ module "ssm_updates_software_secondary" {
   ssm_association_random_string                = random_string.random_string.result
 }
 
-module "ssm_updates_software" {
-  source                                       = "./modules/ssm-associations"
-  ssm_association_approve_after_days           = var.ssm_association_approve_after_days
-  ssm_association_driver_deployment_rate       = var.ssm_association_driver_deployment_rate
-  ssm_association_launch_agent_deployment_rate = var.ssm_association_launch_agent_deployment_rate
-  ssm_association_patching_deployment_rate     = var.ssm_association_patching_deployment_rate
-  ssm_association_ssm_agent_deployment_rate    = var.ssm_association_ssm_agent_deployment_rate
-  ssm_association_inventory_rate               = var.ssm_association_inventory_rate
-  ssm_association_max_concurrency              = var.ssm_association_max_concurrency
-  ssm_association_max_errors                   = var.ssm_association_max_errors
-  ssm_association_patch_group_tag              = "${var.patch_group_tag}-${random_string.random_string.result}"
-  ssm_association_random_string                = random_string.random_string.result
+module "network_secondary" {
+  source            = "./modules/vpc-core"
+  providers         = { aws = aws.secondary }
+  vpc_cidr          = var.vpc_cidr_secondary
+  vpc_name          = var.vpc_name_secondary
+  vpc_random_string = random_string.random_string.result
+}
+
+module "network_peer" {
+  providers = {
+    aws.primary   = aws.primary
+    aws.secondary = aws.secondary
+  }
+  source             = "./modules/vpc-peer"
+  peer_region        = var.aws_region_secondary
+  peer_vpc_cidr      = module.network_secondary.vpc_cidr
+  peer_vpc_id        = module.network_secondary.vpc_id
+  peer_vpc_nat1_rt   = module.network_secondary.nat1_route_table_id
+  peer_vpc_nat2_rt   = module.network_secondary.nat2_route_table_id
+  peer_vpc_nat3_rt   = module.network_secondary.nat3_route_table_id
+  peer_vpc_public_rt = module.network_secondary.public_route_table_id
+  vpc_cidr           = module.network.vpc_cidr
+  vpc_id             = module.network.vpc_id
+  vpc_nat1_rt        = module.network.nat1_route_table_id
+  vpc_nat2_rt        = module.network.nat2_route_table_id
+  vpc_nat3_rt        = module.network.nat3_route_table_id
+  vpc_public_rt      = module.network.public_route_table_id
+}
+
+module "ad_security_group_secondary" {
+  source      = "./modules/vpc-security-group-ingress"
+  providers   = { aws = aws.secondary }
+  description = "AD-Server-Security Group"
+  name        = "AD-Server-Security-Group-${random_string.random_string.result}"
+  ports       = local.ad_ports
+  vpc_id      = module.network_secondary.vpc_id
+}
+
+module "ms_security_group_secondary" {
+  source      = "./modules/vpc-security-group-ingress"
+  providers   = { aws = aws.secondary }
+  description = "Member Server Security Group"
+  name        = "Member-Server-Security-Group-${random_string.random_string.result}"
+  ports       = local.ms_ports
+  vpc_id      = module.network_secondary.vpc_id
+}
+
+module "pki_security_group_secondary" {
+  source      = "./modules/vpc-security-group-ingress"
+  providers   = { aws = aws.secondary }
+  description = "PKI Server Security Group"
+  name        = "PKI-Server-Security-Group-${random_string.random_string.result}"
+  ports       = local.pki_ports
+  vpc_id      = module.network_secondary.vpc_id
+}
+
+module "managed_ad_new_region" {
+  providers = {
+    aws.primary   = aws.primary
+    aws.secondary = aws.secondary
+  }
+  source                                              = "./modules/ds-mad-new-region"
+  mad_new_region_desired_number_of_domain_controllers = var.mad_desired_number_of_domain_controllers
+  mad_new_region_directory_id                         = module.managed_ad.managed_ad_id
+  mad_new_region_domain_fqdn                          = var.mad_domain_fqdn
+  mad_new_region_random_string                        = random_string.random_string.result
+  mad_new_region_region_name                          = var.aws_region_secondary
+  mad_new_region_subnet_ids                           = [module.network_secondary.nat_subnet1_id, module.network_secondary.nat_subnet2_id]
+  mad_new_region_vpc_id                               = module.network_secondary.vpc_id
+  depends_on = [
+    module.fsx_mad
+  ]
 }
