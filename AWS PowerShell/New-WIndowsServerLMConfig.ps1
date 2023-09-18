@@ -7,8 +7,8 @@
 
     .EXAMPLE
 
-        .\New-WIndowsServerLMConfig.ps1 -AmiId 'ami-0d4b65a57d4dec731' -HostFamily 'c5', 'r5', 'm5' -LicenseCount '1024' -Name 'Windows-Server-Datacenter' -ProductInformationFilterValue 'Microsoft Windows Server 2019 Datacenter', 'Microsoft Windows Server 2016 Datacenter' -Region 'us-east-1'  
-    
+        .\New-WIndowsServerLMConfig.ps1 -AmiId 'ami-05a2f04bafd5b7854' -HostFamily 'c5', 'r5', 'm5' -LicenseCount '1024' -Name 'Windows-Server-Datacenter' -ProductInformationFilterValue 'Microsoft Windows Server 2019 Datacenter', 'Microsoft Windows Server 2016 Datacenter' -Region 'us-west-2'
+
     .NOTES
         Author: Jeremy J Girven
         Author E-Mail: girvenj@amazon.com
@@ -28,7 +28,7 @@ Param (
 )
 
 Try {
-Import-Module -Name 'AWS.Tools.LicenseManager' -ErrorAction Stop
+    Import-Module -Name 'AWS.Tools.LicenseManager', 'AWS.Tools.ResourceGroups' -ErrorAction Stop
 } Catch [System.Exception] {
     Write-Output "Failed to import License Manager Powershell module $_"
     Exit 1
@@ -103,7 +103,7 @@ $HostManagement = @(
 $Generic = @(
     @{
         Name   = 'allowed-resource-types'
-        Values = 'AWS::EC2::Host' 
+        Values = 'AWS::EC2::Host'
     },
     @{
         Name   = 'deletion-protection'
