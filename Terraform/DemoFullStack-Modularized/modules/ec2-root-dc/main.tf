@@ -70,7 +70,6 @@ data "aws_iam_policy_document" "ec2" {
     effect    = "Allow"
     resources = ["arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:*:document/AWS-RunRemoteScript", "arn:${data.aws_partition.main.partition}:ssm:${data.aws_region.main.name}:*:document/AWS-RunPowerShellScript"]
   }
-
   statement {
     actions = ["ssm:SendCommand"]
     effect  = "Allow"
@@ -161,7 +160,9 @@ module "store_secret_administrator" {
   source                  = "../secret"
   name                    = "Onpremises-${var.onprem_root_dc_domain_fqdn}-Administrator-Secret-${var.onprem_root_dc_random_string}"
   username                = "Administrator"
+  username_key            = "username"
   password                = random_password.administrator.result
+  password_key            = "password"
   recovery_window_in_days = 0
   secret_kms_key          = module.kms_key.kms_alias_name
 }

@@ -56,14 +56,14 @@ module "kms_key" {
 }
 
 resource "aws_kms_grant" "fsx_svc_account" {
-  name              = "kms-decrypt-fsx-service-account-secret-grant"
+  name              = "kms-decrypt-fsx-onprem-service-account-secret-grant"
   key_id            = module.kms_key.kms_key_id
   grantee_principal = data.aws_iam_role.main.arn
   operations        = ["Decrypt"]
 }
 
 resource "aws_kms_grant" "fsx_setup_account" {
-  name              = "kms-decrypt-fsx-setup-account-secret-grant"
+  name              = "kms-decrypt-fsx-onprem-setup-account-secret-grant"
   key_id            = var.setup_secret_kms_key_arn
   grantee_principal = data.aws_iam_role.main.arn
   operations        = ["Decrypt"]
@@ -77,15 +77,17 @@ resource "random_password" "main" {
 
 module "store_secret_fsx_svc" {
   source                  = "../secret"
-  name                    = "FSx-Svc-Secret-${var.fsx_self_random_string}"
-  username                = var.fsx_self_username
+  name                    = "FSx-Onprem-Svc-Secret-${var.fsx_self_random_string}"
+  username                = "${var.fsx_self_username}-${var.fsx_self_random_string}"
+  username_key            = "username"
   password                = random_password.main.result
+  password_key            = "password"
   recovery_window_in_days = 0
   secret_kms_key          = module.kms_key.kms_alias_name
 }
 
 resource "aws_iam_role_policy" "main" {
-  name = "fsx-svc-policy"
+  name = "fsx-onprem-svc-policy"
   role = var.setup_ec2_iam_role
   policy = jsonencode({
     Version = "2012-10-17"
@@ -115,7 +117,7 @@ resource "aws_iam_role_policy" "main" {
 }
 
 resource "aws_ssm_document" "ssm_fsx_setup" {
-  name            = "SSM-FSx-Setup-${var.fsx_self_random_string}"
+  name            = "SSM-FSx-Onprem-Setup-${var.fsx_self_random_string}"
   document_format = "YAML"
   document_type   = "Command"
   content         = <<DOC
@@ -132,6 +134,9 @@ resource "aws_ssm_document" "ssm_fsx_setup" {
         description: (Required)
         type: String
       DomainNetBIOSName:
+        description: (Required)
+        type: String
+      RandomString:
         description: (Required)
         type: String
       SetupSecretArn:
@@ -281,7 +286,7 @@ resource "aws_ssm_document" "ssm_fsx_setup" {
               }
 
               $FQDN = $Domain | Select-Object -ExpandProperty 'DNSRoot'
-              $FSxOuDn = "OU=FSx,{{FSxOuParentDn}}"
+              $FSxOuDn = "OU=FSx-{{RandomString}},{{FSxOuParentDn}}"
 
               Try {
                   $OuPresent = Get-ADOrganizationalUnit -Identity $FSxOuDn -Credential $Secret.DomainCredentials -ErrorAction Stop
@@ -295,7 +300,7 @@ resource "aws_ssm_document" "ssm_fsx_setup" {
 
               If (-Not $OuPresent) {
                   Try {
-                      New-ADOrganizationalUnit -Name 'FSx' -Path '{{FSxOuParentDn}}' -ProtectedFromAccidentalDeletion $True -Credential $Secret.DomainCredentials -ErrorAction Stop
+                      New-ADOrganizationalUnit -Name 'FSx-{{RandomString}}' -Path '{{FSxOuParentDn}}' -ProtectedFromAccidentalDeletion $True -Credential $Secret.DomainCredentials -ErrorAction Stop
                   } Catch [System.Exception] {
                       Write-Output "Failed to create OU FSx $_"
                       Exit 1
@@ -501,13 +506,14 @@ DOC
 }
 
 resource "aws_ssm_association" "ssm_fsx_setup" {
-  name             = "SSM-FSx-Setup-${var.fsx_self_random_string}"
-  association_name = "SSM-FSx-Setup-${var.fsx_self_random_string}"
+  name             = "SSM-FSx-Onprem-Setup-${var.fsx_self_random_string}"
+  association_name = "SSM-FSx-Onprem-Setup-${var.fsx_self_random_string}"
   parameters = {
-    FSxAdminGroupName = var.fsx_self_file_system_administrators_group
+    FSxAdminGroupName = "${var.fsx_self_file_system_administrators_group}-${var.fsx_self_random_string}"
     FSxOuParentDn     = var.fsx_self_parent_ou_dn
     FSxSvcSecretArn   = module.store_secret_fsx_svc.secret_arn
     DomainNetBIOSName = var.fsx_self_domain_netbios_name
+    RandomString      = var.fsx_self_random_string
     SetupSecretArn    = var.setup_secret_arn
   }
   targets {
@@ -551,10 +557,10 @@ resource "aws_fsx_windows_file_system" "main" {
   self_managed_active_directory {
     dns_ips                                = var.fsx_self_dns_ips
     domain_name                            = var.fsx_self_domain_fqdn
-    file_system_administrators_group       = var.fsx_self_file_system_administrators_group
-    organizational_unit_distinguished_name = "OU=FSx,${var.fsx_self_parent_ou_dn}"
+    file_system_administrators_group       = "${var.fsx_self_file_system_administrators_group}-${var.fsx_self_random_string}"
+    organizational_unit_distinguished_name = "OU=FSx-${var.fsx_self_random_string},${var.fsx_self_parent_ou_dn}"
     password                               = random_password.main.result
-    username                               = var.fsx_self_username
+    username                               = "${var.fsx_self_username}-${var.fsx_self_random_string}"
   }
   depends_on = [time_sleep.wait]
 }
@@ -740,8 +746,6 @@ resource "aws_ssm_document" "ssm_fsx_alias" {
                   Exit 1
               }
 
-              If ('{{RunLocation}}' -eq 'MemberServer') {}
-
               If ('{{RunLocation}}' -eq 'MemberServer') { $DomainCreds = (Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SecretArn}}').DomainCredentials }
 
               Write-Output 'Getting AD domain'
@@ -794,7 +798,7 @@ resource "aws_ssm_association" "fsx_self_alias" {
     key    = "InstanceIds"
     values = [var.setup_ssm_target_instance_id]
   }
-    depends_on = [
+  depends_on = [
     aws_kms_grant.fsx_setup_account,
     aws_ssm_association.ssm_fsx_setup
   ]

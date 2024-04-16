@@ -234,7 +234,8 @@ data "aws_iam_policy_document" "amazon_ssm_managed_ec2_instance_default_role" {
 }
 
 resource "random_string" "random_string" {
-  length  = 8
+  length  = 6
+  numeric = true
   special = false
   upper   = false
 }
@@ -315,7 +316,7 @@ module "pki_security_group_primary" {
   vpc_id      = module.network.vpc_id
 }
 
-module "r53_outbound_resolver" {
+/*module "r53_outbound_resolver" {
   source                      = "./modules/r53-resolver"
   r53_create_inbound_resolver = var.r53_deploy_inbound_resolver
   r53_resolver_name           = var.r53_resolver_name
@@ -406,7 +407,7 @@ module "fsx_mad" {
 }
 
 module "rds_mad" {
-  source                = "./modules/rds-mssql"
+  source                = "./modules/rds-mssql-mad"
   rds_allocated_storage = var.rds_allocated_storage
   rds_directory_id      = module.managed_ad.managed_ad_id
   rds_engine            = var.rds_engine
@@ -419,7 +420,7 @@ module "rds_mad" {
   rds_subnet_ids        = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
   rds_username          = var.rds_username
   rds_vpc_id            = module.network.vpc_id
-}
+}*/
 
 module "kms_ebs_key" {
   source                          = "./modules/kms"
@@ -455,7 +456,7 @@ module "onprem_root_dc_instance" {
   ]
 }
 
-module "connect_ad" {
+/*module "connect_ad" {
   source                       = "./modules/ds-cad"
   cad_dns_ips                  = [module.onprem_root_dc_instance.onprem_ad_ip]
   cad_domain_fqdn              = module.onprem_root_dc_instance.onprem_ad_domain_name
@@ -491,25 +492,53 @@ module "fsx_onpremises" {
   fsx_self_domain_netbios_name              = module.onprem_root_dc_instance.onprem_ad_netbios_name
   fsx_self_dns_ips                          = [module.onprem_root_dc_instance.onprem_ad_ip]
   fsx_self_parent_ou_dn                     = "OU=AWS Applications,DC=onpremises,DC=local"
-  fsx_self_file_system_administrators_group = "FSxAdministrators"
+  fsx_self_file_system_administrators_group = "FSxAdmins"
   fsx_self_random_string                    = random_string.random_string.result
   fsx_self_run_location                     = "DomainController"
   fsx_self_storage_capacity                 = var.fsx_self_storage_capacity
   fsx_self_storage_type                     = var.fsx_self_storage_type
   fsx_self_subnet_ids                       = [module.network.nat_subnet1_id]
   fsx_self_throughput_capacity              = 16
-  fsx_self_username                         = "FSxServiceAccount"
+  fsx_self_username                         = "FSxSvcAct"
   fsx_self_vpc_id                           = module.network.vpc_id
   setup_ec2_iam_role                        = module.onprem_root_dc_instance.onprem_ad_iam_role_name
   setup_secret_arn                          = module.onprem_root_dc_instance.onprem_ad_password_secret_arn
   setup_secret_kms_key_arn                  = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
   setup_ssm_target_instance_id              = module.onprem_root_dc_instance.onprem_ad_instance_id
   depends_on = [
-    module.connect_ad
+    #module.connect_ad
+  ]
+}*/
+
+module "rds_onpremises" {
+  source                        = "./modules/rds-mssql-self-managed"
+  rds_self_allocated_storage    = var.rds_self_allocated_storage
+  rds_self_engine               = var.rds_self_engine
+  rds_self_engine_version       = var.rds_self_engine_version
+  rds_self_identifier           = var.rds_self_identifier
+  rds_self_instance_class       = var.rds_self_instance_class
+  rds_self_port_number          = var.rds_self_port_number
+  rds_self_random_string        = random_string.random_string.result
+  rds_self_storage_type         = var.rds_self_storage_type
+  rds_self_subnet_ids           = [module.network.nat_subnet1_id, module.network.nat_subnet2_id]
+  rds_self_username             = var.rds_self_username
+  rds_self_vpc_id               = module.network.vpc_id
+  setup_ec2_iam_role            = module.onprem_root_dc_instance.onprem_ad_iam_role_name
+  setup_secret_arn              = module.onprem_root_dc_instance.onprem_ad_password_secret_arn
+  setup_secret_kms_key_arn      = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
+  setup_ssm_target_instance_id  = module.onprem_root_dc_instance.onprem_ad_instance_id
+  rds_self_dns_ips              = [module.onprem_root_dc_instance.onprem_ad_ip, "10.0.0.2"]
+  rds_self_domain_netbios_name  = module.onprem_root_dc_instance.onprem_ad_netbios_name
+  rds_self_domain_fqdn          = module.onprem_root_dc_instance.onprem_ad_domain_name
+  rds_self_administrators_group = "RDSAdmins"
+  rds_self_parent_ou_dn         = "OU=AWS Applications,DC=onpremises,DC=local"
+  rds_self_svc_account_username = "RDSSvcAct"
+  depends_on = [
+    #module.connect_ad
   ]
 }
 
-module "onprem_pki_instance" {
+/*module "onprem_pki_instance" {
   source                              = "./modules/ec2-pki"
   onprem_administrator_secret         = module.onprem_root_dc_instance.onprem_ad_password_secret_id
   onprem_administrator_secret_kms_key = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
@@ -582,7 +611,7 @@ module "onprem_additional_root_dc_instance" {
   onprem_additional_dc_vpc_cidr            = module.network.vpc_cidr
 }
 
-resource "aws_launch_template" "secondary" {
+/*resource "aws_launch_template" "secondary" {
   provider = aws.secondary
   name      = "Metadata-Config-Launch-Template-${random_string.random_string.result}"
   metadata_options {
@@ -680,4 +709,4 @@ module "managed_ad_new_region" {
   depends_on = [
     module.fsx_mad
   ]
-}
+}*/

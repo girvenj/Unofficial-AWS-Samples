@@ -82,7 +82,9 @@ module "store_secret" {
   source                  = "../secret"
   name                    = "RDS-MAD-${var.rds_identifier}-Admin-Secret-${var.rds_random_string}"
   username                = var.rds_username
+  username_key            = "username"
   password                = random_password.main.result
+  password_key            = "password"
   recovery_window_in_days = 0
   secret_kms_key          = module.kms_secret_key.kms_alias_name
 }
@@ -136,7 +138,7 @@ resource "aws_db_instance" "rds" {
   domain_iam_role_name                  = aws_iam_role.rds.name
   enabled_cloudwatch_logs_exports       = ["agent", "error"]
   engine                                = var.rds_engine
-  engine_version                        = var.rds_engine_version
+  #engine_version                        = var.rds_engine_version
   identifier                            = var.rds_identifier
   instance_class                        = var.rds_instance_class
   kms_key_id                            = module.kms_secret_key.kms_key_arn

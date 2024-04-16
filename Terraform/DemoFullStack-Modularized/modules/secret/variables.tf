@@ -15,6 +15,12 @@ variable "password" {
   type        = string
 }
 
+variable "password_key" {
+  default     = "password"
+  description = "Password key name for the credential stored in Secret."
+  type        = string
+}
+
 variable "recovery_window_in_days" {
   default     = 0
   description = "Number of days that AWS Secrets Manager waits before it can delete the secret."
@@ -31,5 +37,11 @@ variable "secret_kms_key" {
 variable "username" {
   description = "Username of credential stored in Secret."
   sensitive   = true
+  type        = string
+}
+
+variable "username_key" {
+  default     = "username"
+  description = "Username key name for the credential stored in Secret."
   type        = string
 }

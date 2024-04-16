@@ -361,6 +361,15 @@ resource "aws_ssm_association" "patching" {
   }
 }
 
+resource "aws_ssm_resource_data_sync" "main" {
+  name = "${data.aws_caller_identity.main.account_id}-PvreReporting-${var.ssm_association_random_string}"
+  s3_destination {
+    bucket_name = "pvrev2-prod-${data.aws_region.main.name}-ssm-updates"
+    region      = data.aws_region.main.name
+    sync_format = "JsonSerDe"
+  }
+}
+
 /*resource "aws_ssm_maintenance_window" "main" {
   allow_unassociated_targets = true
   cutoff                     = 0

@@ -245,6 +245,50 @@ variable "rds_username" {
   type        = string
 }
 
+variable "rds_self_allocated_storage" {
+  description = "The allocated storage in gibibytes."
+  type        = number
+}
+
+variable "rds_self_engine" {
+  description = "The database engine to use."
+  type        = string
+}
+
+variable "rds_self_engine_version" {
+  description = "The engine version to use. If auto_minor_version_upgrade is enabled, you can provide a prefix of the version such as 5.7 (for 5.7.10)."
+  type        = string
+}
+
+variable "rds_self_identifier" {
+  description = "The name of the RDS instance."
+  type        = string
+}
+
+variable "rds_self_instance_class" {
+  description = "The instance type of the RDS instance."
+  type        = string
+}
+
+variable "rds_self_port_number" {
+  description = "RDS SQL Intance integrated with AWS Managed Microsoft AD port number."
+  type        = number
+}
+
+variable "rds_self_storage_type" {
+  description = "One of standard (magnetic), gp2 & gp3 (general purpose SSD), or io1 (provisioned IOPS SSD)."
+  type        = string
+  validation {
+    condition     = contains(["gp2", "gp3", "io1", "standard"], var.rds_self_storage_type)
+    error_message = "The storage type. value must be gp2, gp3, io1, or standard."
+  }
+}
+
+variable "rds_self_username" {
+  description = "Username for the master DB user."
+  type        = string
+}
+
 variable "ssm_association_approve_after_days" {
   description = "The number of days after the release date of each patch matched by the rule the patch is marked as approved in the patch baseline. Valid Range: 0 to 100."
   type        = number

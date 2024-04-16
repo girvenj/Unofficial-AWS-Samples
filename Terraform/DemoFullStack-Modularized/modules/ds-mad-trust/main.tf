@@ -314,6 +314,8 @@ resource "aws_ssm_document" "main" {
                   Write-Output 'Trust failed to create or never went verified in 5 minutes'
                   Exit 1
               }
+
+              & netdom.exe trust {{OnpremisesDomainDNSName}} /domain:* /InvokeTrustScanner
 DOC
 }
 

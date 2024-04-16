@@ -9,41 +9,59 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
-    time = {
-      source  = "hashicorp/time"
-      version = "~> 0.9"
+  }
+}
+
+locals {
+  rds_ports = [
+    {
+      from_port   = var.rds_self_port_number
+      to_port     = var.rds_self_port_number
+      description = "SQL"
+      protocol    = "TCP"
+      cidr_blocks = [data.aws_vpc.main.cidr_block]
+    }
+  ]
+}
+
+data "aws_iam_policy_document" "rds_instance_assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["rds.amazonaws.com"]
     }
   }
 }
 
-data "aws_iam_role" "main" {
-  name = var.setup_ec2_iam_role
+data "aws_iam_policy_document" "rds_monitoring_role_assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["monitoring.rds.amazonaws.com"]
+    }
+  }
 }
 
-module "kms_secret_key" {
-  source                          = "../kms"
-  kms_key_description             = "KMS key for CAD Secret encryption"
-  kms_key_usage                   = "ENCRYPT_DECRYPT"
-  kms_customer_master_key_spec    = "SYMMETRIC_DEFAULT"
-  kms_key_deletion_window_in_days = 7
-  kms_enable_key_rotation         = true
-  kms_key_alias_name              = "cad-secret-kms-key"
-  kms_multi_region                = false
-  kms_random_string               = var.cad_random_string
+data "aws_partition" "main" {}
+
+data "aws_region" "main" {}
+
+data "aws_caller_identity" "main" {}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
+  }
 }
 
-resource "aws_kms_grant" "cad_service_account" {
-  name              = "kms-decrypt-cad-service-account-secret-grant"
-  key_id            = module.kms_secret_key.kms_key_id
-  grantee_principal = data.aws_iam_role.main.arn
-  operations        = ["Decrypt"]
-}
-
-resource "aws_kms_grant" "cad_setup_account" {
-  name              = "kms-decrypt-cad-setup-account-secret-grant"
-  key_id            = var.setup_secret_kms_key_arn
-  grantee_principal = data.aws_iam_role.main.arn
-  operations        = ["Decrypt"]
+data "aws_vpc" "main" {
+  id = var.rds_self_vpc_id
 }
 
 resource "random_password" "main" {
@@ -52,19 +70,192 @@ resource "random_password" "main" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-module "store_secret_cad_svc" {
+module "kms_key" {
+  source                          = "../kms"
+  kms_key_description             = "KMS key for RDS self-managed AD encryption"
+  kms_key_usage                   = "ENCRYPT_DECRYPT"
+  kms_customer_master_key_spec    = "SYMMETRIC_DEFAULT"
+  kms_key_deletion_window_in_days = 7
+  kms_enable_key_rotation         = true
+  kms_key_alias_name              = "rds-onprem-kms-key"
+  kms_multi_region                = false
+  kms_random_string               = var.rds_self_random_string
+}
+
+module "store_secret" {
   source                  = "../secret"
-  name                    = "CAD-Svc-Secret-${var.cad_random_string}"
-  username                = "${var.cad_svc_username}-${var.cad_random_string}"
+  name                    = "RDS-Onprem-${var.rds_self_identifier}-Admin-Secret-${var.rds_self_random_string}"
+  username                = var.rds_self_username
   username_key            = "username"
   password                = random_password.main.result
   password_key            = "password"
   recovery_window_in_days = 0
-  secret_kms_key          = module.kms_secret_key.kms_alias_name
+  secret_kms_key          = module.kms_key.kms_alias_name
+}
+
+resource "aws_iam_role" "rds_monitoring_role" {
+  name               = "RDS-Onprem-${var.rds_self_identifier}-Enhanced-Monitoring-Role-${var.rds_self_random_string}"
+  assume_role_policy = data.aws_iam_policy_document.rds_monitoring_role_assume_role_policy.json
+  managed_policy_arns = [
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  ]
+  tags = {
+    Name = "RDS-Onprem-${var.rds_self_identifier}-Enhanced-Monitoring-Role-${var.rds_self_random_string}"
+  }
+}
+
+resource "aws_db_subnet_group" "rds" {
+  name       = "rds-onprem-${var.rds_self_identifier}-subnet-group-${var.rds_self_random_string}"
+  subnet_ids = var.rds_self_subnet_ids
+  tags = {
+    Name = "RDS-Onprem-${var.rds_self_identifier}-Subnet-Group-${var.rds_self_random_string}"
+  }
+}
+
+module "rds_security_group" {
+  source      = "../vpc-security-group-ingress"
+  name        = "RDS-Onprem-${var.rds_self_identifier}-Security-Group-${var.rds_self_random_string}"
+  description = "RDS Onprem ${var.rds_self_identifier} Security Group ${var.rds_self_random_string}"
+  vpc_id      = var.rds_self_vpc_id
+  ports       = local.rds_ports
+}
+
+resource "aws_db_instance" "rds" {
+  allocated_storage                     = var.rds_self_allocated_storage
+  apply_immediately                     = true
+  auto_minor_version_upgrade            = true
+  availability_zone                     = data.aws_availability_zones.available.names[0]
+  backup_retention_period               = 1
+  db_subnet_group_name                  = aws_db_subnet_group.rds.id
+  delete_automated_backups              = true
+  deletion_protection                   = false
+  domain_auth_secret_arn                = module.store_secret_rds_svc.secret_arn
+  domain_dns_ips                        = var.rds_self_dns_ips
+  domain_fqdn                           = var.rds_self_domain_fqdn
+  domain_ou                             = "OU=RDS-${var.rds_self_random_string},${var.rds_self_parent_ou_dn}"
+  enabled_cloudwatch_logs_exports       = ["agent", "error"]
+  engine                                = var.rds_self_engine
+  engine_version                        = var.rds_self_engine_version
+  identifier                            = var.rds_self_identifier
+  instance_class                        = var.rds_self_instance_class
+  kms_key_id                            = module.kms_key.kms_key_arn
+  license_model                         = "license-included"
+  monitoring_interval                   = 5
+  monitoring_role_arn                   = aws_iam_role.rds_monitoring_role.arn
+  multi_az                              = false
+  password                              = random_password.main.result
+  performance_insights_enabled          = true
+  performance_insights_kms_key_id       = module.kms_key.kms_key_arn
+  performance_insights_retention_period = 7
+  port                                  = var.rds_self_port_number
+  publicly_accessible                   = false
+  skip_final_snapshot                   = true
+  storage_encrypted                     = true
+  storage_type                          = var.rds_self_storage_type
+  tags = {
+    Name = "RDS-Onprem-${var.rds_self_identifier}-${var.rds_self_random_string}"
+  }
+  vpc_security_group_ids = [module.rds_security_group.sg_id]
+  username               = var.rds_self_username
+  timeouts {
+    create = "3h"
+    delete = "3h"
+    update = "3h"
+  }
+}
+
+data "aws_iam_role" "main" {
+  name = var.setup_ec2_iam_role
+}
+
+resource "aws_kms_grant" "rds_setup_account" {
+  name              = "kms-decrypt-rds-onprem-setup-account-secret-grant"
+  key_id            = var.setup_secret_kms_key_arn
+  grantee_principal = data.aws_iam_role.main.arn
+  operations        = ["Decrypt"]
+}
+
+resource "random_password" "rds_svc_account" {
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+module "store_secret_rds_svc" {
+  source                  = "../secret"
+  name                    = "RDS-Onprem-Svc-Secret-${var.rds_self_random_string}"
+  username                = "${var.rds_self_svc_account_username}-${var.rds_self_random_string}"
+  username_key            = "CUSTOMER_MANAGED_ACTIVE_DIRECTORY_USERNAME"
+  password                = random_password.rds_svc_account.result
+  password_key            = "CUSTOMER_MANAGED_ACTIVE_DIRECTORY_PASSWORD"
+  recovery_window_in_days = 0
+  secret_kms_key          = module.kms_key.kms_alias_name
+}
+
+resource "aws_kms_grant" "rds_svc_account_setup" {
+  name              = "kms-decrypt-rds-onprem-svc-account-secret-grant-setup"
+  key_id            = module.kms_key.kms_key_arn
+  grantee_principal = data.aws_iam_role.main.arn
+  operations        = ["Decrypt"]
+}
+
+resource "aws_kms_key_policy" "rds_svc" {
+  key_id = module.kms_key.kms_key_id
+  policy = jsonencode({
+    Id = "RDS-Self-AD-${var.rds_self_random_string}"
+    Statement = [
+      {
+        Action = "kms:*"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:${data.aws_partition.main.partition}:iam::${data.aws_caller_identity.main.account_id}:root"
+        }
+        Resource = "*"
+        Sid      = "Enable IAM User Permissions"
+      },
+      {
+        Action = "kms:Decrypt"
+        Effect = "Allow"
+        Principal = {
+          Service = "rds.amazonaws.com"
+        }
+        Resource = "*"
+        Sid      = "Allow RDS Access to KMS Key"
+      }
+    ]
+    Version = "2012-10-17"
+  })
+}
+
+data "aws_iam_policy_document" "rds_svc" {
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["rds.amazonaws.com"]
+    }
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:sourceAccount"
+      values   = ["${data.aws_caller_identity.main.account_id}"]
+    }
+    condition {
+      test     = "ArnLike"
+      variable = "aws:sourceArn"
+      values   = ["arn:${data.aws_partition.main.partition}:rds:${data.aws_region.main.name}:${data.aws_caller_identity.main.account_id}:db:*"]
+    }
+  }
+}
+
+resource "aws_secretsmanager_secret_policy" "rds_svc" {
+  secret_arn = module.store_secret_rds_svc.secret_arn
+  policy     = data.aws_iam_policy_document.rds_svc.json
 }
 
 resource "aws_iam_role_policy" "main" {
-  name = "cad-svc-policy"
+  name = "rds-onprem-svc-policy"
   role = var.setup_ec2_iam_role
   policy = jsonencode({
     Version = "2012-10-17"
@@ -76,7 +267,7 @@ resource "aws_iam_role_policy" "main" {
         ]
         Effect = "Allow"
         Resource = [
-          module.store_secret_cad_svc.secret_arn,
+          module.store_secret_rds_svc.secret_arn,
           var.setup_secret_arn
         ]
       },
@@ -93,21 +284,27 @@ resource "aws_iam_role_policy" "main" {
   })
 }
 
-resource "aws_ssm_document" "main" {
-  name            = "SSM-CAD-Setup-${var.cad_random_string}"
+resource "aws_ssm_document" "ssm_rds_setup" {
+  name            = "SSM-RDS-Onprem-Setup-${var.rds_self_random_string}"
   document_format = "YAML"
   document_type   = "Command"
   content         = <<DOC
     schemaVersion: '2.2'
-    description: Create CAD Service Account
+    description: Create RDS Service Account
     parameters:
-      AdConnectorOuParentDn:
+      RDSAdminGroupName:
         description: (Required)
         type: String
-      AdConnectorSvcSecretArn:
+      RDSOuParentDn:
+        description: (Required)
+        type: String
+      RDSSvcSecretArn:
         description: (Required)
         type: String
       DomainNetBIOSName:
+        description: (Required)
+        type: String
+      RandomString:
         description: (Required)
         type: String
       SetupSecretArn:
@@ -227,7 +424,8 @@ resource "aws_ssm_document" "main" {
                   [CmdletBinding()]
                   Param (
                       [Parameter(Mandatory = $True)][String]$Domain,
-                      [Parameter(Mandatory = $True)][String]$SecretArn
+                      [Parameter(Mandatory = $True)][String]$SecretArn,
+                      [Parameter(Mandatory = $False)][String]$Service
                   )
                   Try {
                       $SecretContent = Get-SECSecretValue -SecretId $SecretArn -ErrorAction Stop | Select-Object -ExpandProperty 'SecretString' | ConvertFrom-Json -ErrorAction Stop
@@ -235,8 +433,14 @@ resource "aws_ssm_document" "main" {
                       Write-Output "Failed to get $SecretArn Secret $_"
                       Exit 1
                   }
-                  $Username = $SecretContent.username
-                  $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                  If ($Service -eq 'RDS') {
+                      $Username = $SecretContent.CUSTOMER_MANAGED_ACTIVE_DIRECTORY_USERNAME
+                      $UserPassword = ConvertTo-SecureString ($SecretContent.CUSTOMER_MANAGED_ACTIVE_DIRECTORY_PASSWORD) -AsPlainText -Force
+                  } Else {
+                      $Username = $SecretContent.username
+                      $UserPassword = ConvertTo-SecureString ($SecretContent.password) -AsPlainText -Force
+                  }
+
                   $DomainCredentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ("$Domain\$Username", $UserPassword)
                   $Credentials = New-Object -TypeName 'System.Management.Automation.PSCredential' ($Username, $UserPassword)
                   $Output = [PSCustomObject][Ordered]@{
@@ -249,7 +453,6 @@ resource "aws_ssm_document" "main" {
               }
 
               $Secret = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{SetupSecretArn}}'
-
               Try {
                   $Domain = Get-ADDomain -Credential $Secret.DomainCredentials -ErrorAction Stop
               } Catch [System.Exception] {
@@ -258,11 +461,10 @@ resource "aws_ssm_document" "main" {
               }
 
               $FQDN = $Domain | Select-Object -ExpandProperty 'DNSRoot'
-              $BaseDn = $Domain | Select-Object -ExpandProperty 'DistinguishedName'
-              $AdcOU = "OU=AD Connector,{{AdConnectorOuParentDn}}"
+              $RDSOuDn = "OU=RDS-{{RandomString}},{{RDSOuParentDn}}"
 
               Try {
-                  $OuPresent = Get-ADOrganizationalUnit -Identity $AdcOU -Credential $Secret.DomainCredentials -ErrorAction Stop
+                  $OuPresent = Get-ADOrganizationalUnit -Identity $RDSOuDn -Credential $Secret.DomainCredentials -ErrorAction Stop
               } Catch [System.Exception] {
                   If ($_ -like 'Directory object not found') {
                       $OuPresent = $Null
@@ -273,19 +475,19 @@ resource "aws_ssm_document" "main" {
 
               If (-Not $OuPresent) {
                   Try {
-                      New-ADOrganizationalUnit -Name 'AD Connector' -Path '{{AdConnectorOuParentDn}}' -ProtectedFromAccidentalDeletion $True -Credential $Secret.DomainCredentials -ErrorAction Stop
+                      New-ADOrganizationalUnit -Name 'RDS-{{RandomString}}' -Path '{{RDSOuParentDn}}' -ProtectedFromAccidentalDeletion $True -Credential $Secret.DomainCredentials -ErrorAction Stop
                   } Catch [System.Exception] {
-                      Write-Output "Failed to create OU AD Connector $_"
+                      Write-Output "Failed to create OU RDS $_"
                       Exit 1
                   }
               }
 
-              $AdcSecretInfo = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{AdConnectorSvcSecretArn}}'
-              $AdcUsername = $AdcSecretInfo.Username
-              $AdcUserPassword = $AdcSecretInfo.UserPassword
+              $RDSSecretInfo = Get-SecretInfo -Domain '{{DomainNetBIOSName}}' -SecretArn '{{RDSSvcSecretArn}}' -Service 'RDS'
+              $RDSUsername = $RDSSecretInfo.Username
+              $RDSUserPassword = $RDSSecretInfo.UserPassword
 
               Try {
-                  $UserPresent = Get-ADUser -Identity $AdcUsername -Credential $Secret.DomainCredentials -ErrorAction Stop
+                  $UserPresent = Get-ADUser -Identity $RDSUsername -Credential $Secret.DomainCredentials -ErrorAction Stop
               } Catch [System.Exception] {
                   If ($_ -like 'Cannot find an object with identity:*') {
                       $UserPresent = $Null
@@ -296,21 +498,40 @@ resource "aws_ssm_document" "main" {
 
               If (-Not $UserPresent) {
                   $User = @{
-                      AccountPassword      = $AdcUserPassword
-                      Name                 = $AdcUsername
-                      DisplayName          = $AdcUsername
-                      SamAccountName       = $AdcUsername
-                      UserPrincipalName    = "$AdcUsername@$FQDN"
+                      AccountPassword      = $RDSUserPassword
+                      Name                 = $RDSUsername
+                      DisplayName          = $RDSUsername
+                      SamAccountName       = $RDSUsername
+                      UserPrincipalName    = "$RDSUsername@$FQDN"
                       PasswordNeverExpires = $True
                       Enabled              = $True
-                      Path                 = $AdcOU
+                      Path                 = $RDSOuDn
                       Credential           = $Secret.DomainCredentials
                   }
 
                   Try {
                       New-ADUser @User 
                   } Catch [System.Exception] {
-                      Write-Output "Failed to create $AdcUsername $_"
+                      Write-Output "Failed to create $RDSUsername $_"
+                      Exit 1
+                  }
+              }
+
+              Try {
+                  $GroupPresent = Get-ADGroup -Identity '{{RDSAdminGroupName}}' -Credential $Secret.DomainCredentials -ErrorAction Stop
+              } Catch [System.Exception] {
+                  If ($_ -like 'Cannot find an object with identity:*') {
+                      $GroupPresent = $Null
+                  } Else {
+                      Write-Output "Failed to query AD $_"
+                  }
+              }
+
+              If (-Not $GroupPresent) {
+                  Try {
+                      New-ADGroup -DisplayName '{{RDSAdminGroupName}}' -GroupCategory 'Security' -GroupScope 'DomainLocal' -Name '{{RDSAdminGroupName}}' -Path $RDSOuDn -SamAccountName '{{RDSAdminGroupName}}' -Credential $Secret.DomainCredentials  -ErrorAction Stop
+                  } Catch [System.Exception] {
+                      Write-Output "Failed to create '{{RDSAdminGroupName}}' $_"
                       Exit 1
                   }
               }
@@ -362,145 +583,95 @@ resource "aws_ssm_document" "main" {
                   }
 
                   Try {
-                      [System.GUID]$ServicePrincipalNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'servicePrincipalName' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
                       [System.GUID]$ComputerNameGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'computer' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
-                      [System.GUID]$CertificationAuthorityGuid = (Get-ADObject -SearchBase $RootDse.SchemaNamingContext -Filter { lDAPDisplayName -eq 'certificationAuthority' } -Properties 'schemaIDGUID' -ErrorAction Stop).schemaIDGUID
                   } Catch [System.Exception] {
-                      Write-Output "Failed to get Schema GUIDs $_"
+                      Write-Output "Failed to get computer SchemaNamingContext $_"
                       Exit 1
                   }
 
+                  $ExtendedRightsMap = @{ }
                   Try {
-                      $User = Get-ADUser -Identity $Using:AdcUsername -ErrorAction Stop
+                      $ErNamingContexts = Get-ADObject -SearchBase $RootDse.ConfigurationNamingContext -LDAPFilter '(&(objectclass=controlAccessRight)(rightsguid=*))' -Properties displayName, rightsGuid -ErrorAction Stop
                   } Catch [System.Exception] {
-                      Write-Output "Failed to get $Using:AdcUsername $_"
+                      Write-Output "Failed to get ExtendedRightsMap $_"
                       Exit 1
                   }
 
-                  Try {
-                       $CompContainerDN = Get-ADDomain -ErrorAction Stop | Select-Object -ExpandProperty 'ComputersContainer'
-                  } Catch [System.Exception] {
-                        Write-Output "Failed to get default computer object container $_"
-                        Exit 1
+                  ForEach ($ErNamingContext in $ErNamingContexts) {
+                      $ExtendedRightsMap[$ErNamingContext.displayName] = [System.GUID]$ErNamingContext.rightsGuid
                   }
 
-                  $IdentityReference = $User | Select-Object -ExpandProperty 'SID'
-                  $AccountDn = $User | Select-Object -ExpandProperty 'DistinguishedName'
-                  $NullGuid = [System.GUID]'00000000-0000-0000-0000-000000000000'
+                  Try {
+                      $IdentityReference = Get-ADUser -Identity $Using:RDSUsername -ErrorAction Stop | Select-Object -ExpandProperty 'SID'
+                  } Catch [System.Exception] {
+                      Write-Output "Failed to get $Using:RDSUsername $_"
+                      Exit 1
+                  }
 
+                  $NullGuid = [System.Guid]::empty
                   $AclRules = @(
                       @{
-                          Path = $AccountDn
+                          Path = $Using:RDSOuDn
                           Acl  = @{
-                              ActiveDirectoryRights              = 'WriteProperty'
-                              AccessControlType                  = 'Allow'
-                              ObjectGUID                         = $ServicePrincipalNameGuid
-                              ActiveDirectorySecurityInheritance = 'None'
-                          }
-                      },
-                      @{
-                          Path = $CompContainerDN
-                          Acl  = @{
-                              ActiveDirectoryRights              = 'CreateChild'
+                              ActiveDirectoryRights              = 'CreateChild, DeleteChild'
                               AccessControlType                  = 'Allow'
                               ObjectGUID                         = $ComputerNameGuid
                               ActiveDirectorySecurityInheritance = 'All'
+                              InheritedObjectGuid                = $NullGuid
                           }
                       },
                       @{
-                          Path = "CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
+                          Path = $Using:RDSOuDn
                           Acl  = @{
-                              ActiveDirectoryRights              = 'ReadProperty,WriteProperty,CreateChild,DeleteChild'
+                              ActiveDirectoryRights              = 'Self'
                               AccessControlType                  = 'Allow'
-                              ObjectGUID                         = $CertificationAuthorityGuid
-                              ActiveDirectorySecurityInheritance = 'None'
+                              ObjectGUID                         = $ExtendedRightsMap['Validated write to service principal name']
+                              ActiveDirectorySecurityInheritance = 'Descendents'
+                              InheritedObjectGuid                = $ComputerNameGuid
                           }
                       },
                       @{
-                          Path = "CN=AIA,CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
+                          Path = $Using:RDSOuDn
                           Acl  = @{
-                              ActiveDirectoryRights              = 'ReadProperty,WriteProperty,CreateChild,DeleteChild'
+                              ActiveDirectoryRights              = 'Self'
                               AccessControlType                  = 'Allow'
-                              ObjectGUID                         = $CertificationAuthorityGuid
-                              ActiveDirectorySecurityInheritance = 'None'
+                              ObjectGUID                         = $ExtendedRightsMap['Validated write to DNS host name']
+                              ActiveDirectorySecurityInheritance = 'Descendents'
+                              InheritedObjectGuid                = $ComputerNameGuid
                           }
-                      },
-                      @{
-                          Path = "CN=Certification Authorities,CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
-                          Acl  = @{
-                              ActiveDirectoryRights              = 'ReadProperty,WriteProperty,CreateChild,DeleteChild'
-                              AccessControlType                  = 'Allow'
-                              ObjectGUID                         = $CertificationAuthorityGuid
-                              ActiveDirectorySecurityInheritance = 'None'
-                          }
-                      },
-                      @{
-                          Path = "CN=NTAuthCertificates,CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
-                          Acl  = @{
-                              ActiveDirectoryRights              = 'ReadProperty,WriteProperty'
-                              AccessControlType                  = 'Allow'
-                              ObjectGUID                         = $NullGuid
-                              ActiveDirectorySecurityInheritance = 'None'
-                          }
-                      }
+                      } 
                   )
 
-                  $NTAuthCertificatesDN = "CN=NTAuthCertificates,CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
-                  If (-Not (Test-Path -Path $NTAuthCertificatesDN)) {
-                      Try{
-                          New-ADObject -Name 'NTAuthCertificates' -Type 'certificationAuthority' -OtherAttributes @{certificateRevocationList=[byte[]]'00';authorityRevocationList=[byte[]]'00';cACertificate=[byte[]]'00'} -Path "CN=Public Key Services,CN=Services,CN=Configuration,$($RootDSE.rootDomainNamingContext)"
-                      } Catch [System.Exception] {
-                          Write-Output "Failed to create NTAuthCertificates object $_"
-                          Exit 1
-                      }
-                  }
-
                   Foreach ($AclRule in $AclRules) {
-                      Add-OuAcl -AclPath $AclRule.Path -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.Acl.ActiveDirectoryRights -AccessControlType $AclRule.Acl.AccessControlType -ObjectGUID $AclRule.Acl.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.Acl.ActiveDirectorySecurityInheritance
+                      Add-OuAcl -AclPath $AclRule.Path -IdentityReference $IdentityReference -ActiveDirectoryRights $AclRule.Acl.ActiveDirectoryRights -AccessControlType $AclRule.Acl.AccessControlType -ObjectGUID $AclRule.Acl.ObjectGUID -ActiveDirectorySecurityInheritance $AclRule.Acl.ActiveDirectorySecurityInheritance -InheritedObjectGuid $AclRule.Acl.InheritedObjectGuid
                   }
               }
               Set-CredSSP -Action 'Disable'
 DOC
 }
 
-resource "aws_ssm_association" "main" {
-  name             = "SSM-CAD-Setup-${var.cad_random_string}"
-  association_name = "SSM-CAD-Setup-${var.cad_random_string}"
+resource "aws_ssm_association" "ssm_rds_setup" {
+  name             = "SSM-RDS-Onprem-Setup-${var.rds_self_random_string}"
+  association_name = "SSM-RDS-Onprem-Setup-${var.rds_self_random_string}"
   parameters = {
-    AdConnectorOuParentDn   = var.cad_parent_ou_dn
-    AdConnectorSvcSecretArn = module.store_secret_cad_svc.secret_arn
-    DomainNetBIOSName       = var.cad_domain_netbios_name
-    SetupSecretArn          = var.setup_secret_arn
+    RDSAdminGroupName = "${var.rds_self_administrators_group}-${var.rds_self_random_string}"
+    RDSOuParentDn     = var.rds_self_parent_ou_dn
+    RDSSvcSecretArn   = module.store_secret_rds_svc.secret_arn
+    DomainNetBIOSName = var.rds_self_domain_netbios_name
+    RandomString      = var.rds_self_random_string
+    SetupSecretArn    = var.setup_secret_arn
   }
   targets {
     key    = "InstanceIds"
     values = [var.setup_ssm_target_instance_id]
   }
   depends_on = [
-    aws_kms_grant.cad_service_account,
+    aws_kms_grant.rds_setup_account,
     aws_iam_role_policy.main
   ]
 }
 
 resource "time_sleep" "wait" {
-  depends_on      = [aws_ssm_association.main]
+  depends_on      = [aws_ssm_association.ssm_rds_setup]
   create_duration = "3m"
-}
-
-resource "aws_directory_service_directory" "main" {
-  name       = var.cad_domain_fqdn
-  password   = random_password.main.result
-  short_name = var.cad_domain_netbios_name
-  size       = var.cad_size
-  type       = "ADConnector"
-  tags = {
-    Name = "CAD-${var.cad_domain_fqdn}-${var.cad_random_string}"
-  }
-  connect_settings {
-    customer_dns_ips  = var.cad_dns_ips
-    customer_username = "${var.cad_svc_username}-${var.cad_random_string}"
-    subnet_ids        = var.cad_subnet_ids
-    vpc_id            = var.cad_vpc_id
-  }
-  depends_on = [time_sleep.wait]
 }

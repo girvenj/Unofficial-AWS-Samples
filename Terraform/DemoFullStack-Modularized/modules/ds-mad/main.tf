@@ -34,7 +34,9 @@ module "store_secret" {
   source                  = "../secret"
   name                    = "MAD-${var.mad_domain_fqdn}-Admin-Secret-${var.mad_random_string}"
   username                = "Admin"
+  username_key            = "username"
   password                = random_password.main.result
+  password_key            = "password"
   recovery_window_in_days = 0
   secret_kms_key          = module.kms_secret_key.kms_alias_name
 }
