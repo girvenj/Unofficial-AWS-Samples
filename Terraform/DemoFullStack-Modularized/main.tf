@@ -456,6 +456,34 @@ module "onprem_root_dc_instance" {
   ]
 }
 
+module "fsx_ontap" {
+  source                                     = "./modules/fsx-ontap"
+  fsx_ontap_alias                            = var.fsx_ontap_alias
+  fsx_ontap_automatic_backup_retention_days  = var.fsx_ontap_automatic_backup_retention_days
+  fsx_ontap_deployment_type                  = var.fsx_ontap_deployment_type
+  fsx_ontap_domain_fqdn                      = module.onprem_root_dc_instance.onprem_ad_domain_name
+  fsx_ontap_domain_netbios_name              = module.onprem_root_dc_instance.onprem_ad_netbios_name
+  fsx_ontap_dns_ips                          = [module.onprem_root_dc_instance.onprem_ad_ip]
+  fsx_ontap_parent_ou_dn                     = "OU=AWS Applications,DC=onpremises,DC=local"
+  fsx_ontap_file_system_administrators_group = "FSxOntapAdmins"
+  fsx_ontap_random_string                    = random_string.random_string.result
+  fsx_ontap_root_volume_security_style       = var.fsx_ontap_root_volume_security_style
+  fsx_ontap_run_location                     = "DomainController"
+  fsx_ontap_storage_capacity                 = var.fsx_ontap_storage_capacity
+  fsx_ontap_storage_type                     = var.fsx_ontap_storage_type
+  fsx_ontap_subnet_ids                       = [module.network.nat_subnet1_id]
+  fsx_ontap_throughput_capacity              = var.fsx_ontap_throughput_capacity
+  fsx_ontap_username                         = "FSxOntapSvcAct"
+  fsx_ontap_vpc_id                           = module.network.vpc_id
+  setup_ec2_iam_role                         = module.onprem_root_dc_instance.onprem_ad_iam_role_name
+  setup_secret_arn                           = module.onprem_root_dc_instance.onprem_ad_password_secret_arn
+  setup_secret_kms_key_arn                   = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
+  setup_ssm_target_instance_id               = module.onprem_root_dc_instance.onprem_ad_instance_id
+  depends_on = [
+    #module.connect_ad
+  ]
+}
+
 /*module "connect_ad" {
   source                       = "./modules/ds-cad"
   cad_dns_ips                  = [module.onprem_root_dc_instance.onprem_ad_ip]
@@ -508,7 +536,7 @@ module "fsx_onpremises" {
   depends_on = [
     #module.connect_ad
   ]
-}*/
+}
 
 module "rds_onpremises" {
   source                        = "./modules/rds-mssql-self-managed"
@@ -538,7 +566,7 @@ module "rds_onpremises" {
   ]
 }
 
-/*module "onprem_pki_instance" {
+module "onprem_pki_instance" {
   source                              = "./modules/ec2-pki"
   onprem_administrator_secret         = module.onprem_root_dc_instance.onprem_ad_password_secret_id
   onprem_administrator_secret_kms_key = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn

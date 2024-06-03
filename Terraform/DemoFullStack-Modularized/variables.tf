@@ -70,6 +70,53 @@ variable "fsx_mad_throughput_capacity" {
   type        = number
 }
 
+variable "fsx_ontap_alias" {
+  description = "DNS alias name that you want to associate with the Amazon FSx file system."
+  type        = string
+}
+
+variable "fsx_ontap_automatic_backup_retention_days" {
+  description = "The number of days to retain automatic backups. Minimum of 0 and maximum of 90."
+  type        = number
+}
+
+variable "fsx_ontap_deployment_type" {
+  description = "Specifies the file system deployment type, valid values are MULTI_AZ_1, SINGLE_AZ_1 and SINGLE_AZ_2."
+  type        = string
+  validation {
+    condition     = contains(["MULTI_AZ_1", "SINGLE_AZ_1", "SINGLE_AZ_2"], var.fsx_ontap_deployment_type)
+    error_message = "The storage type value must be MULTI_AZ_1, SINGLE_AZ_1, or SINGLE_AZ_2"
+  }
+}
+
+variable "fsx_ontap_root_volume_security_style" {
+  description = "Specifies the root volume security style, Valid values are UNIX, NTFS, and MIXED."
+  type        = string
+  validation {
+    condition     = contains(["UNIX", "NTFS", "MIXED"], var.fsx_ontap_root_volume_security_style)
+    error_message = "The value must be UNIX, NTFS, or MIXED."
+  }
+}
+
+variable "fsx_ontap_storage_capacity" {
+  description = "Storage capacity (GiB) of the file system. Minimum of 32 and maximum of 65536."
+  type        = number
+}
+
+variable "fsx_ontap_storage_type" {
+  description = "Specifies the storage type, valid values are SSD."
+  type        = string
+  validation {
+    condition     = contains(["SSD"], var.fsx_ontap_storage_type)
+    error_message = "The storage type value must be SSD."
+  }
+}
+
+variable "fsx_ontap_throughput_capacity" {
+  description = "Throughput (megabytes per second) of the file system. Minimum value of 8. Maximum value of 100000."
+  type        = number
+}
+
 variable "fsx_self_alias" {
   description = "DNS alias name that you want to associate with the Amazon FSx file system."
   type        = string
