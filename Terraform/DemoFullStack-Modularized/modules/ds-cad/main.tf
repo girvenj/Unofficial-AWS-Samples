@@ -208,15 +208,17 @@ resource "aws_ssm_document" "main" {
                               Exit 1
                           }
 
-                          Write-Output 'Removing CredSSP registry entries'
-                          Try {
-                              Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
-                          } Catch [System.Exception] {
-                              Write-Output "Failed to remove CredSSP registry entries $_"
-                              Exit 1
+                          If (Test-Path -Path $(Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey)) {
+                              Write-Output 'Removing CredSSP registry entries'
+                              Try {
+                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
+                              } Catch [System.Exception] {
+                                  Write-Output "Failed to remove CredSSP registry entries $_"
+                                  #Exit 1
+                              }
                           }
                       }
-                      Default { 
+                      Default {
                           Write-Output 'InvalidArgument: Invalid value is passed for parameter Action'
                           Exit 1
                       }

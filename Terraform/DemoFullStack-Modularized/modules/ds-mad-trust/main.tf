@@ -221,16 +221,17 @@ resource "aws_ssm_document" "main" {
                               Write-Output "Failed to disable CredSSP $_"
                               Exit 1
                           }
-
-                          Write-Output 'Removing CredSSP registry entries'
-                          Try {
-                              Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
-                          } Catch [System.Exception] {
-                              Write-Output "Failed to remove CredSSP registry entries $_"
-                              Exit 1
+                          If (Test-Path -Path $(Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey)) {
+                              Write-Output 'Removing CredSSP registry entries'
+                              Try {
+                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
+                              } Catch [System.Exception] {
+                                  Write-Output "Failed to remove CredSSP registry entries $_"
+                                  #Exit 1
+                              }
                           }
                       }
-                      Default { 
+                      Default {
                           Write-Output 'InvalidArgument: Invalid value is passed for parameter Action'
                           Exit 1
                       }
@@ -286,6 +287,13 @@ resource "aws_ssm_document" "main" {
                   Invoke-TrustAction -RemoteFQDN '{{MadDomainDNSName}}' -TrustPassword $TrustPassword -TrustDirection $Using:TrustDirOnprem
               }
 
+              Try {
+                  Import-Module -Name 'AWS.Tools.DirectoryService' -Force -ErrorAction 'Stop'
+              } Catch [System.Exception] {
+                  Write-Output "Failed to import AWS DS module $_"
+                  Exit 1
+              }
+
               $TrustTypeForest = New-Object -TypeName 'Amazon.DirectoryService.TrustType' -ArgumentList 'Forest'
               $TrustDir = New-Object -TypeName 'Amazon.DirectoryService.TrustDirection' -ArgumentList $TrustDirMAD
               $SelectiveAuthDis = New-Object -TypeName 'Amazon.DirectoryService.SelectiveAuth' -ArgumentList 'Disabled'
@@ -316,6 +324,8 @@ resource "aws_ssm_document" "main" {
               }
 
               & netdom.exe trust {{OnpremisesDomainDNSName}} /domain:* /InvokeTrustScanner
+
+              Set-CredSSP -Action 'Disable'
 DOC
 }
 

@@ -242,6 +242,12 @@ Resources:
                           Exit 1
                       }
                   }
+                  Try{
+                      $Null = Add-WindowsCapability -Online -Name 'WMIC~~~~'
+                  } Catch [System.Exception] {
+                      Write-Output "Failed to install WMIC feature $_"
+                      Exit 1
+                  }
                   Try {
                       $Null = Install-PackageProvider -Name 'NuGet' -MinimumVersion '2.8.5' -Force -ErrorAction Stop
                   } Catch [System.Exception] {
@@ -729,10 +735,6 @@ Resources:
                                   Name = 'GPMC'
                                   DependsOn = '[WindowsFeature]RSAT-ADDS'
                               }
-                              WindowsFeature AzureArcSetup {
-                                  Name = 'AzureArcSetup'
-                                  Ensure = 'Absent'
-                              }
                               Registry CrossForestGPO {
                                   Key = 'HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\System\'
                                   ValueName = 'AllowX-ForestPolicy-and-RUP'
@@ -1111,7 +1113,21 @@ Resources:
                          $BaseDn = $ADOnline | Select-Object -ExpandProperty 'DistinguishedName'
                          Set-DefaultContainer -ComputerDN "OU=Domain Computer Objects Staging,$BaseDn" -UserDN "OU=Domain Users,$BaseDn"
                      }
-                  } 
+                  }
+                  If ($DeploymentType -eq 'Member' -or $DeploymentType -eq 'EnterpriseCAManagementInstance') {
+                        Try {
+                            $AdminPresent = Get-ADUser -Identity 'Admin' -Credential $Secret.DomainCredentials -ErrorAction Stop
+                        } Catch [System.Exception] {
+                            Write-Output "Failed to get Admin user, directory may not be a MAD"
+                        }
+                        If ($AdminPresent) {
+                            Try {
+                                Set-ADUser -Identity 'Admin' -PasswordNeverExpires $true -Credential $Secret.DomainCredentials -ErrorAction Stop
+                            } Catch [System.Exception] {
+                                Write-Output "Failed to set Admin Password to never expires"
+                            }
+                        }
+                  }
               CloudWatchOutputConfig:
                 CloudWatchOutputEnabled: true
                 CloudWatchLogGroupName: !Sub /aws/Demo/${AWS::StackName}
@@ -2988,12 +3004,14 @@ Resources:
                                   Write-Output "Failed to disable CredSSP $_"
                                   Exit 1
                               }
-                              Write-Output 'Removing CredSSP registry entries'
-                              Try {
-                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
-                              } Catch [System.Exception] {
-                                  Write-Output "Failed to remove CredSSP registry entries $_"
-                                  Exit 1
+                              If (Test-Path -Path $(Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey)) {
+                                  Write-Output 'Removing CredSSP registry entries'
+                                  Try {
+                                      Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
+                                  } Catch [System.Exception] {
+                                      Write-Output "Failed to remove CredSSP registry entries $_"
+                                      #Exit 1
+                                  }
                               }
                           }
                           Default {

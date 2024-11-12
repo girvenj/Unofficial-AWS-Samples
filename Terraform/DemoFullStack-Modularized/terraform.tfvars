@@ -1,9 +1,9 @@
 aws_region_primary        = "us-west-2"
 aws_region_secondary      = "us-east-2"
 cad_size                  = "Large"
-default_ec2_instance_type = "m7i.large"
+default_ec2_instance_type = "m7a.large"
 #ec2_ami_name                                  = "TPM-Windows_Server-2022-English-Full-Base*"
-ec2_ami_name                                  = "Windows_Server-2022-English-Full-Base*"
+ec2_ami_name                                  = "Windows_Server-2025-English-Full-Base*"
 ec2_ami_owner                                 = "amazon"
 fsx_mad_alias                                 = "FSx-MAD"
 fsx_mad_automatic_backup_retention_days       = 7

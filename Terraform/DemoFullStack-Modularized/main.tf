@@ -243,12 +243,14 @@ resource "random_string" "random_string" {
 resource "aws_iam_role" "amazon_ssm_managed_ec2_instance_default_role" {
   name               = "Amazon-SSM-Managed-EC2-Instance-Default-Role-${random_string.random_string.result}"
   assume_role_policy = data.aws_iam_policy_document.amazon_ssm_managed_ec2_instance_default_role.json
-  managed_policy_arns = [
-    "arn:${data.aws_partition.main.partition}:iam::aws:policy/AmazonSSMManagedEC2InstanceDefaultPolicy"
-  ]
   tags = {
     Name = "Amazon-SSM-Managed-EC2-Instance-Default-Role-${random_string.random_string.result}"
   }
+}
+
+resource "aws_iam_role_policy_attachments_exclusive" "amazon_ssm_managed_ec2_instance_default_role" {
+  role_name   = aws_iam_role.amazon_ssm_managed_ec2_instance_default_role.name
+  policy_arns = ["arn:${data.aws_partition.main.partition}:iam::aws:policy/AmazonSSMManagedEC2InstanceDefaultPolicy"]
 }
 
 resource "aws_ssm_service_setting" "default_role" {
@@ -316,7 +318,7 @@ module "pki_security_group_primary" {
   vpc_id      = module.network.vpc_id
 }
 
-/*module "r53_outbound_resolver" {
+module "r53_outbound_resolver" {
   source                      = "./modules/r53-resolver"
   r53_create_inbound_resolver = var.r53_deploy_inbound_resolver
   r53_resolver_name           = var.r53_resolver_name
@@ -386,7 +388,7 @@ module "r53_outbound_resolver_rule_mad" {
   r53_rule_vpc_id                   = module.network.vpc_id
 }
 
-module "fsx_mad" {
+/*module "fsx_mad" {
   source                                  = "./modules/fsx-mad"
   fsx_mad_alias                           = var.fsx_mad_alias
   fsx_mad_automatic_backup_retention_days = var.fsx_mad_automatic_backup_retention_days
@@ -456,7 +458,7 @@ module "onprem_root_dc_instance" {
   ]
 }
 
-module "fsx_ontap" {
+/*module "fsx_ontap" {
   source                                     = "./modules/fsx-ontap"
   fsx_ontap_alias                            = var.fsx_ontap_alias
   fsx_ontap_automatic_backup_retention_days  = var.fsx_ontap_automatic_backup_retention_days
@@ -482,9 +484,9 @@ module "fsx_ontap" {
   depends_on = [
     #module.connect_ad
   ]
-}
+}*/
 
-/*module "connect_ad" {
+module "connect_ad" {
   source                       = "./modules/ds-cad"
   cad_dns_ips                  = [module.onprem_root_dc_instance.onprem_ad_ip]
   cad_domain_fqdn              = module.onprem_root_dc_instance.onprem_ad_domain_name
@@ -511,7 +513,7 @@ module "r53_outbound_resolver_rule_onprem_root" {
   r53_rule_vpc_id                   = module.network.vpc_id
 }
 
-module "fsx_onpremises" {
+/*module "fsx_onpremises" {
   source                                    = "./modules/fsx-self-managed"
   fsx_self_alias                            = var.fsx_self_alias
   fsx_self_automatic_backup_retention_days  = var.fsx_self_automatic_backup_retention_days
@@ -564,7 +566,7 @@ module "rds_onpremises" {
   depends_on = [
     #module.connect_ad
   ]
-}
+}*/
 
 module "onprem_pki_instance" {
   source                              = "./modules/ec2-pki"
@@ -587,7 +589,7 @@ module "onprem_pki_instance" {
   onprem_pki_vpc_cidr                 = module.network.vpc_cidr
 }
 
-module "onprem_child_dc_instance" {
+/*module "onprem_child_dc_instance" {
   source                              = "./modules/ec2-child-dc"
   onprem_administrator_secret         = module.onprem_root_dc_instance.onprem_ad_password_secret_id
   onprem_administrator_secret_kms_key = module.onprem_root_dc_instance.onprem_ad_password_secret_kms_key_arn
@@ -639,7 +641,7 @@ module "onprem_additional_root_dc_instance" {
   onprem_additional_dc_vpc_cidr            = module.network.vpc_cidr
 }
 
-/*resource "aws_launch_template" "secondary" {
+resource "aws_launch_template" "secondary" {
   provider = aws.secondary
   name      = "Metadata-Config-Launch-Template-${random_string.random_string.result}"
   metadata_options {

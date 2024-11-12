@@ -96,12 +96,16 @@ module "store_secret" {
 resource "aws_iam_role" "rds_monitoring_role" {
   name               = "RDS-Onprem-${var.rds_self_identifier}-Enhanced-Monitoring-Role-${var.rds_self_random_string}"
   assume_role_policy = data.aws_iam_policy_document.rds_monitoring_role_assume_role_policy.json
-  managed_policy_arns = [
-    "arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-  ]
   tags = {
     Name = "RDS-Onprem-${var.rds_self_identifier}-Enhanced-Monitoring-Role-${var.rds_self_random_string}"
   }
+}
+
+resource "aws_iam_role_policy_attachments_exclusive" "rds_monitoring_role" {
+  role_name   = aws_iam_role.rds_monitoring_role.name
+  policy_arns = [
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  ]
 }
 
 resource "aws_db_subnet_group" "rds" {
@@ -405,12 +409,14 @@ resource "aws_ssm_document" "ssm_rds_setup" {
                               Exit 1
                           }
 
-                          Write-Output 'Removing CredSSP registry entries'
-                          Try {
-                              Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
-                          } Catch [System.Exception] {
-                              Write-Output "Failed to remove CredSSP registry entries $_"
-                              Exit 1
+                          If (Test-Path -Path $(Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey)) {
+                              Write-Output 'Removing CredSSP registry entries'
+                              Try {
+                                  Remove-Item -Path (Join-Path -Path "Registry::$RootKey" -ChildPath $CredDelKey) -Force -Recurse -ErrorAction Stop
+                              } Catch [System.Exception] {
+                                  Write-Output "Failed to remove CredSSP registry entries $_"
+                                  #Exit 1
+                              }
                           }
                       }
                       Default { 

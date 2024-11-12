@@ -490,12 +490,12 @@ Resources:
       GroupDescription: !Sub Demo-VPC-R53-Outbound-Resolver-Security-Group-${AWS::StackName}
       GroupName: !Sub Demo-VPC-R53-Outbound-Resolver-Security-Group-${AWS::StackName}
       SecurityGroupEgress:
-        - Description: FSx SMB Access
+        - Description: DNS Access
           FromPort: 53
           IpProtocol: udp
           CidrIp: 0.0.0.0/0
           ToPort: 53
-        - Description: FSx WinRM Access
+        - Description: DNS Access
           FromPort: 53
           IpProtocol: udp
           CidrIp: 0.0.0.0/0
@@ -634,7 +634,7 @@ Resources:
         - SubnetId: !Ref VPCPublicSubnet2Subnet
       Name: !Sub Demo-VPC-R53-Outbound-Resolver-${AWS::StackName}
       SecurityGroupIds:
-        - !Ref 'DomainMembersSG'
+        - !Ref R53SG
       Tags:
         - Key: Name
           Value: !Sub Demo-VPC-R53-Outbound-Resolver-${AWS::StackName}

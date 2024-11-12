@@ -92,21 +92,31 @@ module "store_secret" {
 resource "aws_iam_role" "rds" {
   name                = "RDS-MAD-${var.rds_identifier}-Domain-IAM-Role-${var.rds_random_string}"
   assume_role_policy  = data.aws_iam_policy_document.rds_instance_assume_role_policy.json
-  managed_policy_arns = ["arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSDirectoryServiceAccess"]
   tags = {
     Name = "RDS-${var.rds_identifier}-Domain-IAM-Role-${var.rds_random_string}"
   }
 }
 
+resource "aws_iam_role_policy_attachments_exclusive" "rds" {
+  role_name   = aws_iam_role.rds.name
+  policy_arns = [
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSDirectoryServiceAccess"
+  ]
+}
+
 resource "aws_iam_role" "rds_monitoring_role" {
   name               = "RDS-MAD-${var.rds_identifier}-Enhanced-Monitoring-Role-${var.rds_random_string}"
   assume_role_policy = data.aws_iam_policy_document.rds_monitoring_role_assume_role_policy.json
-  managed_policy_arns = [
-    "arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-  ]
   tags = {
     Name = "RDS-MAD-${var.rds_identifier}-Enhanced-Monitoring-Role-${var.rds_random_string}"
   }
+}
+
+resource "aws_iam_role_policy_attachments_exclusive" "rds_monitoring_role" {
+  role_name   = aws_iam_role.rds_monitoring_role.name
+  policy_arns = [
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  ]
 }
 
 resource "aws_db_subnet_group" "rds" {

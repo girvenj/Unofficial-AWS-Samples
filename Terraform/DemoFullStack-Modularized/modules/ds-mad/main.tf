@@ -58,7 +58,7 @@ resource "aws_directory_service_directory" "main" {
   }
 }
 
-resource "aws_security_group_rule" "main" {
+/*resource "aws_security_group_rule" "main" {
   type              = "egress"
   description       = "All outbound"
   to_port           = 0
@@ -66,4 +66,4 @@ resource "aws_security_group_rule" "main" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
   security_group_id = aws_directory_service_directory.main.security_group_id
-}
+}*/

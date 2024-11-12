@@ -132,17 +132,23 @@ resource "aws_kms_grant" "kms_administrator_secret" {
 resource "aws_iam_role" "ec2" {
   name               = "Onprem-Root-DC-${var.onprem_root_dc_domain_fqdn}-EC2-Instance-IAM-Role-${var.onprem_root_dc_random_string}"
   assume_role_policy = data.aws_iam_policy_document.ec2_instance_assume_role_policy.json
-  inline_policy {
-    name   = "build-policy"
-    policy = data.aws_iam_policy_document.ec2.json
-  }
-  managed_policy_arns = [
-    "arn:${data.aws_partition.main.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore",
-    "arn:${data.aws_partition.main.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
-  ]
   tags = {
     Name = "Onprem-Root-DC-${var.onprem_root_dc_domain_fqdn}-EC2-Instance-IAM-Role-${var.onprem_root_dc_random_string}"
   }
+}
+
+resource "aws_iam_role_policy" "build" {
+  name = "build-policy"
+  role = aws_iam_role.ec2.id
+  policy = data.aws_iam_policy_document.ec2.json
+}
+
+resource "aws_iam_role_policy_attachments_exclusive" "ec2" {
+  role_name   = aws_iam_role.ec2.name
+  policy_arns = [
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore",
+    "arn:${data.aws_partition.main.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
+  ]
 }
 
 resource "aws_iam_instance_profile" "ec2" {
