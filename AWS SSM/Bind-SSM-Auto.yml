@@ -492,14 +492,14 @@ mainSteps:
       Parameters:
         commands: |-
           #!/bin/bash
+          export DEBIAN_FRONTEND=noninteractive
           apt-get update -y
           apt-get install -y bind9 bind9utils apparmor-utils wget
           ARCH=$(dpkg --print-architecture)
 
           # Install CloudWatch Agent
-          #wget https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
-          wget "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/${ARCH}/latest/amazon-cloudwatch-agent.deb"
-          dpkg -i -E ./amazon-cloudwatch-agent.deb
+          #wget "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/${ARCH}/latest/amazon-cloudwatch-agent.deb"
+          #dpkg -i -E ./amazon-cloudwatch-agent.deb
 
           # Disable AppArmor for BIND to allow custom log paths during testing
           aa-disable /etc/apparmor.d/usr.sbin.named
@@ -540,33 +540,8 @@ mainSteps:
               file "/var/lib/bind/test.internal.zone";
           };
           EOF
-          systemctl restart bind9
           systemctl enable bind9
-
-          # Configure CloudWatch Agent (Ubuntu paths)
-          cat << 'EOF' > /opt/aws/amazon-cloudwatch-agent/bin/config.json
-          {
-            "logs": {
-              "logs_collected": {
-                "files": {
-                  "collect_list": [
-                    {
-                      "file_path": "/var/log/syslog",
-                      "log_group_name": "/aws/SSMAutomation/BindTest-Setup",
-                      "log_stream_name": "system"
-                    },
-                    {
-                      "file_path": "/var/log/named/named.log",
-                      "log_group_name": "/aws/SSMAutomation/BindTest-Setup",
-                      "log_stream_name": "named"
-                    }
-                  ]
-                }
-              }
-            }
-          }
-          EOF
-          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json -s
+          systemctl restart bind9
   - name: waitForConfig
     action: aws:sleep
     nextStep: startBindTest
@@ -628,14 +603,14 @@ mainSteps:
 
           # Run BIND performance against "$Instance1Type"
           echo -e "\n------------------------------------------" 
-          echo "RUNNING TEST 1/6: $Instance1Type Throughput & Concurrency (dnsperf)" 
+          echo "RUNNING TEST 1/4: $Instance1Type Throughput & Concurrency (dnsperf)" 
           echo "------------------------------------------" 
           dnsperf -s $Instance1IP -d /home/ubuntu/dnsperf_queries.txt -c 1000 -q 10000 -l 120 -v 2>&1 | grep -vE "NOERROR|NXDOMAIN|T" 
 
           sleep 20
 
           echo -e "\n------------------------------------------" 
-          echo "RUNNING TEST 2/6: $Instance1Type Latency Ramping (resperf)" 
+          echo "RUNNING TEST 2/4: $Instance1Type Latency Ramping (resperf)" 
           echo "------------------------------------------" 
           resperf -s $Instance1IP -d /home/ubuntu/dnsperf_queries.txt -r 120 -c 120 -m 300000 -v  2>&1
 
@@ -643,14 +618,14 @@ mainSteps:
 
           # Run BIND performance against "$Instance2Type"
           echo -e "\n------------------------------------------" 
-          echo "RUNNING TEST 3/6: $Instance2Type Throughput & Concurrency (dnsperf)" 
+          echo "RUNNING TEST 3/4: $Instance2Type Throughput & Concurrency (dnsperf)" 
           echo "------------------------------------------" 
           dnsperf -s $Instance2IP -d /home/ubuntu/dnsperf_queries.txt -c 1000 -q 10000 -l 120 -v 2>&1 | grep -vE "NOERROR|NXDOMAIN|T" 
 
           sleep 20
 
           echo -e "\n------------------------------------------" 
-          echo "RUNNING TEST 4/6: $Instance2Type Latency Ramping (resperf)" 
+          echo "RUNNING TEST 4/4: $Instance2Type Latency Ramping (resperf)" 
           echo "------------------------------------------" 
           resperf -s $Instance2IP -d /home/ubuntu/dnsperf_queries.txt -r 120 -c 120 -m 300000 -v  2>&1
 
