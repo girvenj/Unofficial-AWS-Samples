@@ -1,0 +1,767 @@
+description: Creates BIND Performance Test.
+schemaVersion: '0.3'
+parameters:
+  x86AmiName:
+    default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    description: Image Name to launch EC2 instances
+    type: String
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  AvailiblitytZone:
+    default: us-west-2a
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  x86InstanceType1:
+    default: m8a.large
+    description: Target instance type
+    type: String
+  x86InstanceType2:
+    default: m8i.large
+    description: Target instance type
+    type: String
+  x86LoadInstanceType1:
+    default: m8a.24xlarge
+    description: Load generator instance type
+    type: String
+mainSteps:
+  - name: createVpc
+    action: aws:executeAwsApi
+    nextStep: configureVpcDnsHost
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateVpc
+      CidrBlock: 10.0.0.0/24
+      TagSpecifications:
+        - ResourceType: vpc
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: vpcId
+        Selector: $.Vpc.VpcId
+        Type: String
+      - Name: vpcCIDR
+        Selector: $.Vpc.CidrBlock
+        Type: String
+  - name: configureVpcDnsHost
+    action: aws:executeAwsApi
+    nextStep: configureVpcDns
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsHostnames:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: configureVpcDns
+    action: aws:executeAwsApi
+    nextStep: createRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsSupport:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRouteTable
+    action: aws:executeAwsApi
+    nextStep: createInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: routeTableId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+  - name: createInternetGateway
+    action: aws:executeAwsApi
+    nextStep: attachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateInternetGateway
+      TagSpecifications:
+        - ResourceType: internet-gateway
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: internetGatewayId
+        Selector: $.InternetGateway.InternetGatewayId
+        Type: String
+  - name: attachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: createRoute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AttachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRoute
+    action: aws:executeAwsApi
+    nextStep: createSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: '{{createInternetGateway.internetGatewayId}}'
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: createSubnet
+    action: aws:executeAwsApi
+    nextStep: configureModifySubnetAttribute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: 10.0.0.0/27
+      AvailabilityZone: '{{AvailiblitytZone}}'
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: subnetId
+        Selector: $.Subnet.SubnetId
+        Type: String
+  - name: configureModifySubnetAttribute
+    action: aws:executeAwsApi
+    nextStep: associateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifySubnetAttribute
+      MapPublicIpOnLaunch:
+        Value: true
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: associateRouteTable
+    action: aws:executeAwsApi
+    nextStep: getx86AmiId
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+    outputs:
+      - Name: associationId
+        Selector: $.AssociationId
+        Type: String
+  - name: getx86AmiId
+    action: aws:executeAwsApi
+    nextStep: createInstanceRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{x86AmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String      
+  - name: createInstanceRole
+    action: aws:executeAwsApi
+    nextStep: attachManagedSSMPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateRole
+      AssumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}'
+      RoleName: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceRoleName
+        Selector: $.Role.RoleName
+        Type: String
+  - name: attachManagedSSMPolicy
+    action: aws:executeAwsApi
+    nextStep: attachManagedCWPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: attachManagedCWPolicy
+    action: aws:executeAwsApi
+    nextStep: putRolePolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: putRolePolicy
+    action: aws:executeAwsApi
+    nextStep: createInstanceProfile
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: PutRolePolicy
+      PolicyDocument: >-
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Resource": [ "*" ],
+                    "Action": [
+                        "ec2:DescribeInstanceTypes",
+                        "ec2:DescribeInstanceTypeOfferings"
+                    ]
+                }
+            ]
+        }
+      PolicyName: BindTest-{{automation:EXECUTION_ID}}
+      RoleName: BindTest-{{automation:EXECUTION_ID}}
+  - name: createInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: addInstanceRoleToProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateInstanceProfile
+      InstanceProfileName: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceProfileArn
+        Selector: $.InstanceProfile.Arn
+        Type: String
+      - Name: instanceProfileName
+        Selector: $.InstanceProfile.InstanceProfileName
+        Type: String
+  - name: addInstanceRoleToProfile
+    action: aws:executeAwsApi
+    nextStep: createBindTestSecGroup
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AddRoleToInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createBindTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: bindTestSecGroupIngress
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: BindTestSecGroup-{{automation:EXECUTION_ID}}
+      Description: Security Group for Test
+      VpcId: '{{createVpc.vpcId}}'
+    outputs:
+      - Name: bindTestGroupId
+        Selector: $.GroupId
+        Type: String
+  - name: bindTestSecGroupIngress
+    action: aws:executeAwsApi
+    nextStep: waitForIam
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{createBindTestSecGroup.bindTestGroupId}}'
+      IpPermissions:
+        - FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: SSH TCP
+        - FromPort: 53
+          ToPort: 53
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: DNS TCP
+        - FromPort: 53
+          ToPort: 53
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: DNS UDP
+  - name: waitForIam
+    action: aws:sleep
+    nextStep: launchInstance1
+    isEnd: false
+    inputs:
+      Duration: PT20S
+  - name: launchInstance1
+    action: aws:executeAwsApi
+    nextStep: launchInstance2
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{x86InstanceType1}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createBindTestSecGroup.bindTestGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: BindTest-{{x86InstanceType1}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: launchInstance2
+    action: aws:executeAwsApi
+    nextStep: launchInstance3
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{x86InstanceType2}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createBindTestSecGroup.bindTestGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: BindTest-{{x86InstanceType2}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: launchInstance3
+    action: aws:executeAwsApi
+    nextStep: waitForBoot
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{x86LoadInstanceType1}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createBindTestSecGroup.bindTestGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: BindTest-{{x86LoadInstanceType1}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: BindTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: waitForBoot
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+      DesiredState: running
+      Force: false
+      CheckStateOnly: true
+      FailOnUnexpectedStopped: true
+    nextStep: configureInstance
+  - name: configureInstance
+    action: aws:runCommand
+    timeoutSeconds: 1200
+    nextStep: waitForConfig
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/BindTest-Setup
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+      Parameters:
+        commands: |-
+          #!/bin/bash
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -y
+          apt-get install -y bind9 bind9utils apparmor-utils wget
+          ARCH=$(dpkg --print-architecture)
+
+          # Install CloudWatch Agent
+          #wget "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/${ARCH}/latest/amazon-cloudwatch-agent.deb"
+          #dpkg -i -E ./amazon-cloudwatch-agent.deb
+
+          # Disable AppArmor for BIND to allow custom log paths during testing
+          aa-disable /etc/apparmor.d/usr.sbin.named
+
+          mkdir -p /var/log/named
+          chown bind:bind /var/log/named
+
+          # Generate 3M record Zone File
+          ZONE_FILE="/var/lib/bind/test.internal.zone"
+          echo "\$TTL 86400" > $ZONE_FILE
+          echo "@ IN SOA ns1.test.internal. admin.test.internal. ( 2026080901 3600 1800 604800 86400 )" >> $ZONE_FILE
+          echo "@ IN NS ns1.test.internal." >> $ZONE_FILE
+          echo "ns1 IN A 127.0.0.1" >> $ZONE_FILE
+          seq 1 2000000 | awk '{print "host-"$1" IN A 10.10.10.10"}' >> $ZONE_FILE
+          chown root:bind $ZONE_FILE
+          chmod 640 $ZONE_FILE
+
+          # Configure named.conf
+          cat << 'EOF' > /etc/bind/named.conf
+          options {
+              directory "/var/cache/bind";
+              listen-on port 53 { any; };
+              listen-on-v6 port 53 { none; };
+              allow-query { any; };
+              recursion no;
+              dnssec-validation no;
+          };
+          logging {
+              channel default_log {
+                  file "/var/log/named/named.log" versions 3 size 20m;
+                  severity info;
+                  print-time yes;
+              };
+              category default { default_log; };
+          };
+          zone "test.internal" IN {
+              type master;
+              file "/var/lib/bind/test.internal.zone";
+          };
+          EOF
+          systemctl enable bind9
+          systemctl restart bind9
+  - name: waitForConfig
+    action: aws:sleep
+    nextStep: startBindTest
+    isEnd: false
+    inputs:
+      Duration: PT30S
+  - name: startBindTest
+    action: aws:runCommand
+    timeoutSeconds: 10800
+    nextStep: deleteInstance
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/BindTest-Run
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchInstance3.InstanceId}}'
+      Parameters:
+        commands: |-
+          #!/bin/bash
+          apt-get update -y
+          
+          # Install native dnsperf, dig (dnsutils), and CW agent dependencies
+          apt-get install -y dnsperf dnsutils wget curl
+
+          # Generate randomized 100M query file (Ubuntu path)
+          (for i in {1..50}; do seq 1 1000000; done) | awk '{print "host-"$1".test.internal. A"}' | shuf > /home/ubuntu/dnsperf_queries.txt
+          LOG_FILE="/home/ubuntu/dnsperf_results.log"
+          touch $LOG_FILE
+          chown -R ubuntu:ubuntu /home/ubuntu/
+
+          # Define Target Private IPs
+          Instance1IP='{{launchInstance1.InstancePrivateIP}}'
+          Instance2IP='{{launchInstance2.InstancePrivateIP}}'
+          Instance1Type='{{launchInstance1.InstanceType}}'
+          Instance2Type='{{launchInstance2.InstanceType}}'
+
+          echo "==========================================" 
+          echo "STARTING AUTOMATED BIND PERFORMANCE SUITE" 
+          echo "Timestamp: $(date)" 
+          echo "$Instance1Type Target IP: $Instance1IP" 
+          echo "$Instance2Type Target IP: $Instance2IP" 
+          echo "==========================================" 
+
+          # Function to block until BIND is answering on target
+          wait_for_dns() {
+            local ip=$1
+            local name=$2
+            echo "Checking DNS readiness on $name ($ip)..." 
+            while ! dig +short +time=2 +tries=1 @$ip host-1.test.internal A | grep -q "10.10.10.10"; do
+              sleep 5
+            done
+            echo "DNS service on $name ($ip) is UP and READY!" 
+          }
+
+          wait_for_dns "$Instance1IP" "$Instance1Type"
+          wait_for_dns "$Instance2IP" "$Instance2Type"
+
+          # Run BIND performance against "$Instance1Type"
+          echo -e "\n------------------------------------------" 
+          echo "RUNNING TEST 1/4: $Instance1Type Throughput & Concurrency (dnsperf)" 
+          echo "------------------------------------------" 
+          dnsperf -s $Instance1IP -d /home/ubuntu/dnsperf_queries.txt -c 1000 -q 10000 -l 120 -v 2>&1 | grep -vE "NOERROR|NXDOMAIN|T" 
+
+          sleep 20
+
+          echo -e "\n------------------------------------------" 
+          echo "RUNNING TEST 2/4: $Instance1Type Latency Ramping (resperf)" 
+          echo "------------------------------------------" 
+          resperf -s $Instance1IP -d /home/ubuntu/dnsperf_queries.txt -r 120 -c 120 -m 300000 -v  2>&1
+
+          sleep 20
+
+          # Run BIND performance against "$Instance2Type"
+          echo -e "\n------------------------------------------" 
+          echo "RUNNING TEST 3/4: $Instance2Type Throughput & Concurrency (dnsperf)" 
+          echo "------------------------------------------" 
+          dnsperf -s $Instance2IP -d /home/ubuntu/dnsperf_queries.txt -c 1000 -q 10000 -l 120 -v 2>&1 | grep -vE "NOERROR|NXDOMAIN|T" 
+
+          sleep 20
+
+          echo -e "\n------------------------------------------" 
+          echo "RUNNING TEST 4/4: $Instance2Type Latency Ramping (resperf)" 
+          echo "------------------------------------------" 
+          resperf -s $Instance2IP -d /home/ubuntu/dnsperf_queries.txt -r 120 -c 120 -m 300000 -v  2>&1
+
+          echo -e "\n==========================================" 
+          echo "ALL BIND PERFORMANCE TESTS COMPLETE" 
+          echo "Timestamp: $(date)" 
+          echo "==========================================" 
+  - name: deleteInstance
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+      DesiredState: terminated
+      Force: true
+      CheckStateOnly: false
+    nextStep: deleteBindTestSecGroup
+  - name: deleteBindTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicySSM
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSecurityGroup
+      GroupId: '{{createBindTestSecGroup.bindTestGroupId}}'
+  - name: detachRolePolicySSM
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicyCW
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRolePolicyCW
+    action: aws:executeAwsApi
+    nextStep: deleteInlineRolePolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInlineRolePolicy
+    action: aws:executeAwsApi
+    nextStep: detachRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRolePolicy
+      PolicyName: BindTest-{{automation:EXECUTION_ID}}
+      RoleName: BindTest-{{automation:EXECUTION_ID}}
+  - name: detachRole
+    action: aws:executeAwsApi
+    nextStep: deleteRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: RemoveRoleFromInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteRole
+    action: aws:executeAwsApi
+    nextStep: deleteInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRole
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: detachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+  - name: detachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: disassociateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DetachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: disassociateRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DisassociateRouteTable
+      AssociationId: '{{associateRouteTable.associationId}}'
+  - name: deleteSubnet
+    action: aws:executeAwsApi
+    nextStep: deleteInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSubnet
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: deleteInternetGateway
+    action: aws:executeAwsApi
+    nextStep: deleteRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+  - name: deleteRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteVpc
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: deleteVpc
+    action: aws:executeAwsApi
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteVpc
+      VpcId: '{{createVpc.vpcId}}'
