@@ -1,0 +1,847 @@
+description: Creates Prime Number Test.
+schemaVersion: '0.3'
+parameters:
+  AmiName:
+    default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
+    description: Image Name to launch EC2 instance
+    type: String
+    allowedValues:
+      - /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
+      - /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+      - /aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  AvailiblitytZone:
+    default: us-west-2a
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  InstanceType1:
+    default: m8azn.large
+    description: Instance type of the Instance
+    type: String
+  InstanceType2:
+    default: x8aedz.large
+    description: Instance type of the Instance
+    type: String
+  InstanceType3:
+    default: m8a.large
+    description: Instance type of the Instance
+    type: String
+  InstanceType4:
+    default: m8i.large
+    description: Instance type of the Instance
+    type: String
+  PrimeNumberTestRunLimit:
+    default: '10'
+    description: The number of times the test will run in a loop
+    type: String
+  PrimeNumberTestUpperNumberRange:
+    default: '10000'
+    description: The upper number of the range to find prime numbers in (larger the number the longer it takes to process)
+    type: String
+mainSteps:
+  - name: createVpc
+    action: aws:executeAwsApi
+    nextStep: configureVpcDnsHost
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateVpc
+      CidrBlock: 10.0.0.0/24
+      TagSpecifications:
+        - ResourceType: vpc
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: vpcId
+        Selector: $.Vpc.VpcId
+        Type: String
+  - name: configureVpcDnsHost
+    action: aws:executeAwsApi
+    nextStep: configureVpcDns
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsHostnames:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: configureVpcDns
+    action: aws:executeAwsApi
+    nextStep: createRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsSupport:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRouteTable
+    action: aws:executeAwsApi
+    nextStep: createInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: routeTableId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+  - name: createInternetGateway
+    action: aws:executeAwsApi
+    nextStep: attachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateInternetGateway
+      TagSpecifications:
+        - ResourceType: internet-gateway
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: internetGatewayId
+        Selector: $.InternetGateway.InternetGatewayId
+        Type: String
+  - name: attachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: createRoute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AttachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRoute
+    action: aws:executeAwsApi
+    nextStep: createSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: '{{createInternetGateway.internetGatewayId}}'
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: createSubnet
+    action: aws:executeAwsApi
+    nextStep: configureModifySubnetAttribute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: 10.0.0.0/27
+      AvailabilityZone: '{{AvailiblitytZone}}'
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: subnetId
+        Selector: $.Subnet.SubnetId
+        Type: String
+  - name: configureModifySubnetAttribute
+    action: aws:executeAwsApi
+    nextStep: associateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifySubnetAttribute
+      MapPublicIpOnLaunch:
+        Value: true
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: associateRouteTable
+    action: aws:executeAwsApi
+    nextStep: getAmiId
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+    outputs:
+      - Name: associationId
+        Selector: $.AssociationId
+        Type: String
+  - name: getAmiId
+    action: aws:executeAwsApi
+    nextStep: createInstanceRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{AmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String
+  - name: createInstanceRole
+    action: aws:executeAwsApi
+    nextStep: attachManagedSSMPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateRole
+      AssumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}'
+      RoleName: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceRoleName
+        Selector: $.Role.RoleName
+        Type: String
+  - name: attachManagedSSMPolicy
+    action: aws:executeAwsApi
+    nextStep: attachManagedCWPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: attachManagedCWPolicy
+    action: aws:executeAwsApi
+    nextStep: putRolePolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: putRolePolicy
+    action: aws:executeAwsApi
+    nextStep: createInstanceProfile
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: PutRolePolicy
+      PolicyDocument: >-
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Resource": [ "*" ],
+                    "Action": [
+                        "ec2:DescribeInstanceTypes",
+                        "ec2:DescribeInstanceTypeOfferings"
+                    ]
+                }
+            ]
+        }
+      PolicyName: PrimeNumberTest-{{automation:EXECUTION_ID}}
+      RoleName: PrimeNumberTest-{{automation:EXECUTION_ID}}
+  - name: createInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: addInstanceRoleToProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateInstanceProfile
+      InstanceProfileName: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceProfileArn
+        Selector: $.InstanceProfile.Arn
+        Type: String
+      - Name: instanceProfileName
+        Selector: $.InstanceProfile.InstanceProfileName
+        Type: String
+  - name: addInstanceRoleToProfile
+    action: aws:executeAwsApi
+    nextStep: createPrimeNumberTestSecGroup
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AddRoleToInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createPrimeNumberTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: waitForIam
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: PrimeNumberTestSecGroup-{{automation:EXECUTION_ID}}
+      Description: Security Group for Prime Number Test
+      VpcId: '{{createVpc.vpcId}}'
+    outputs:
+      - Name: primeNumberTestGroupId
+        Selector: $.GroupId
+        Type: String
+  - name: waitForIam
+    action: aws:sleep
+    nextStep: launchInstance1
+    isEnd: false
+    inputs:
+      Duration: PT20S
+  - name: launchInstance1
+    action: aws:executeAwsApi
+    nextStep: launchInstance2
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{InstanceType1}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createPrimeNumberTestSecGroup.primeNumberTestGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{InstanceType1}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+  - name: launchInstance2
+    action: aws:executeAwsApi
+    nextStep: launchInstance3
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{InstanceType2}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createPrimeNumberTestSecGroup.primeNumberTestGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{InstanceType2}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+  - name: launchInstance3
+    action: aws:executeAwsApi
+    nextStep: launchInstance4
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      CpuOptions:
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{InstanceType3}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createPrimeNumberTestSecGroup.primeNumberTestGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{InstanceType3}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+  - name: launchInstance4
+    action: aws:executeAwsApi
+    nextStep: waitForBoot
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{InstanceType4}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createPrimeNumberTestSecGroup.primeNumberTestGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{InstanceType4}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: PrimeNumberTest-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+  - name: waitForBoot
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+        - '{{launchInstance4.InstanceId}}'
+      DesiredState: running
+      Force: false
+      CheckStateOnly: true
+    nextStep: configureInstance
+  - name: configureInstance
+    action: aws:runCommand
+    timeoutSeconds: 1200
+    nextStep: waitForConfigReboot
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/PrimeNumberTest-ID
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+        - '{{launchInstance4.InstanceId}}'
+      Parameters:
+        commands: |-
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $RegistryItems = @(
+              @{
+                  Name         = 'SchUseStrongCrypto'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\.NETFramework\v4.0.30319'
+                  Value        = '1'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'SchUseStrongCrypto'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319'
+                  Value        = '1'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'HideFirstRunExperience'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge'
+                  Value        = '1'
+                  PropertyType = 'DWORD'
+              }
+          )
+          Foreach ($RegistryItem in $RegistryItems) {
+              $KeyPresent = Test-Path -Path $RegistryItem.Path -ErrorAction SilentlyContinue
+              If (-not $KeyPresent) {
+                  Try {
+                      $Null = New-Item -Path $RegistryItem.Path -Force -ErrorAction Stop
+                  } Catch [System.Exception] {
+                      Write-Output "Failed to create registry item $($RegistryItem.Path) $_"
+                      Exit 1
+                  }
+              }
+              Try {
+                  $Null = New-ItemProperty @RegistryItem -Force -ErrorAction Stop
+              } Catch [System.Exception] {
+                  Write-Output "Failed to create registry item propertie $($RegistryItem.Name) $_"
+                  Exit 1
+              }
+          }
+          $TempPresent = Test-Path -Path 'C:\Temp' -ErrorAction SilentlyContinue
+          If (-not $TempPresent) {
+              Try {
+                  $Null = New-Item -Path 'C:\Temp' -ItemType 'Directory' -ErrorAction Stop
+              } Catch [System.Exception] {
+                  Write-Output "Failed to create C:\Temp directory $_"
+                  Exit 1
+              }
+          }
+          $Ps7Present = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'PowerShell 7-x64' }
+          If (-not $Ps7Present) {
+              $MsiPresent = Test-Path -Path 'C:\Temp\ps.msi' -ErrorAction SilentlyContinue
+              If ($MsiPresent -eq $false) {
+                  Try {
+                      $Version = Invoke-WebRequest 'https://github.com/PowerShell/PowerShell/releases/latest' -Headers @{"Accept" = "application/json" } -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'Content' | ConvertFrom-Json | Select-Object -ExpandProperty 'tag_name'
+                      $VersionMinusV = $Version.Substring(1)
+                  } Catch [System.Exception] {
+                      Write-Output "Failed to get latest PS version $_"
+                      Exit 1
+                  }
+                  $Null = (New-Object -TypeName 'System.Net.WebClient').DownloadFile("https://github.com/PowerShell/PowerShell/releases/download/$Version/PowerShell-$VersionMinusV-win-x64.msi", 'C:\Temp\ps.msi')
+              }
+              $MsiPresent = Test-Path -Path 'C:\Temp\ps.msi' -ErrorAction SilentlyContinue
+              If ($MsiPresent -eq $false) {
+                  Write-Output "PS installer did not download"
+                  Exit 1
+              }
+              $Process = Start-Process -FilePath 'msiexec.exe' -ArgumentList '/I C:\Temp\ps.msi /quiet /l C:\Temp\ps-install-log.txt' -NoNewWindow -PassThru -Wait -ErrorAction Stop
+              If ($Process.ExitCode -ne 0) {
+                  Write-Output "Error installing PS exit code $($Process.ExitCode)"
+                  Exit 1
+              }
+              Try {
+                  Remove-Item -Path 'C:\Temp\ps.msi' -ErrorAction SilentlyContinue
+              } Catch [System.Exception] {
+                  Write-Output "Failed to remove PS MSI $_"
+              }
+              Exit 3010
+          }
+  - name: waitForConfigReboot
+    action: aws:sleep
+    nextStep: startPrimeNumberTest
+    isEnd: false
+    inputs:
+      Duration: PT1M
+  - name: startPrimeNumberTest
+    action: aws:runCommand
+    timeoutSeconds: 10800
+    nextStep: deleteInstance
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/PrimeNumberTest-ID
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+        - '{{launchInstance4.InstanceId}}'
+      Parameters:
+        commands: |-
+          $PrimeNumberTestResults = Invoke-Command -ScriptBlock {
+              &'C:\Program Files\PowerShell\7\pwsh.exe' '-Command', {
+                  Function Start-PrimeNumberTest {
+                      [CmdletBinding()]
+                      param(
+                          [Parameter(Mandatory = $True)][Int32]$TestRunLimit, #The number of times the test will run in a loop
+                          [Parameter(Mandatory = $True)][Int32]$UpperNumberRange #The upper number of the range to find prime numbers in (larger the number the longer it takes to process)
+                      )
+                      Try {
+                          [string]$Token = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '3600' } -Method 'PUT' -Uri 'http://169.254.169.254/latest/api/token' -UseBasicParsing -ErrorAction Stop
+                          $InstanceType = (Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token } -Method 'GET' -Uri 'http://169.254.169.254/latest/dynamic/instance-identity/document' -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'instanceType').ToLower()
+                      } Catch [System.Exception] {
+                          Write-Output "Failed to get instance type $_"
+                          Exit 1
+                      }
+                      $vCPUCount = Get-EC2InstanceType -InstanceType $InstanceType | Select-Object -ExpandProperty 'VCpuInfo' | Select-Object -ExpandProperty 'DefaultVCpus'
+                      $DoCount = 0
+                      $NumberRange = 2..$UpperNumberRange
+                      [System.Collections.ArrayList]$TimeArray = @()
+                      Do {
+                          $Time = Measure-Command {
+                              $Range = $NumberRange
+                              $Count = 0
+                              $Range | ForEach-Object -Parallel {
+                                  $Number = $_
+                                  $Divisor = [Math]::Sqrt($Number)
+                                  2..$Divisor | ForEach-Object {
+                                      If ($Number % $_ -eq 0) {
+                                          $Prime = $False
+                                      } Else {
+                                          $Prime = $True
+                                      }
+                                  }
+                                  If ($Prime) {
+                                      $Count++
+                                      If ($Count % 10 -eq 0) {
+                                          $Null
+                                      }
+                                  }
+                              } -ThrottleLimit $vCPUCount
+                          }
+                          $DoCount++
+                          [void]$TimeArray.Add($Time.TotalSeconds)
+                          Start-Sleep -Seconds 5
+                      } Until ($DoCount -eq $TestRunLimit)
+                      $Output = $TimeArray | Measure-Object -Average -Maximum -Minimum | Select-Object -Property 'Count', 'Average', 'Maximum', 'Minimum'
+                      Write-Output $Output.Count
+                      Write-Output $Output.Average
+                      Write-Output $Output.Maximum
+                      Write-Output $output.Minimum
+                  }
+                  Start-PrimeNumberTest -TestRunLimit '{{PrimeNumberTestRunLimit}}' -UpperNumberRange '{{PrimeNumberTestUpperNumberRange}}'
+              }
+          }
+          Import-Module 'AWS.Tools.CloudWatch'
+          Try {
+              [string]$Token = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '3600' } -Method 'PUT' -Uri 'http://169.254.169.254/latest/api/token' -UseBasicParsing -ErrorAction Stop
+              $InstanceType = (Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $Token } -Method 'GET' -Uri 'http://169.254.169.254/latest/dynamic/instance-identity/document' -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty 'instanceType').ToLower()
+              $InstanceTypeName = $InstanceType.Replace(".", "-")
+          } Catch [System.Exception] {
+              Write-Output "Failed to get instance type $_"
+              Exit 1
+          }
+          $vCPUCount = Get-EC2InstanceType -InstanceType $InstanceType | Select-Object -ExpandProperty 'VCpuInfo' | Select-Object -ExpandProperty 'DefaultVCpus'
+          If (((Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors) -eq $vCPUCount) {
+              $InstanceTypeName = $InstanceType.Replace(".", "-")
+          } else {
+              $InstanceTypeName = "$($InstanceType.Replace(".", "-"))-Optimized"
+          }
+          $Dimension = New-Object -TypeName Amazon.CloudWatch.Model.Dimension
+          $Dimension.Name = 'InstanceType'
+          $Dimension.Value = $InstanceTypeName
+          $Metrics = @(
+              @{
+                  Dimensions  = $Dimension
+                  MetricName  = 'Avg time to complete (S)'
+                  MetricValue = $($PrimeNumberTestResults[1])
+                  Timestamp   = (Get-Date).ToUniversalTime()
+              },
+              @{
+                  Dimensions  = $Dimension
+                  MetricName  = 'Max time to complete (S)'
+                  MetricValue = $($PrimeNumberTestResults[2])
+                  Timestamp   = (Get-Date).ToUniversalTime()
+              },
+              @{
+                  Dimensions  = $Dimension
+                  MetricName  = 'Min time to complete (S)'
+                  MetricValue = $($PrimeNumberTestResults[3])
+                  Timestamp   = (Get-Date).ToUniversalTime()
+              }
+          )
+          Foreach ($Metric in $Metrics) {
+              $MetricDatum = New-Object 'Amazon.CloudWatch.Model.MetricDatum'
+              $MetricDatum.Dimensions = $Metric.Dimensions
+              $MetricDatum.MetricName = $Metric.MetricName
+              $MetricDatum.Timestamp = (Get-Date).ToUniversalTime()
+              $MetricDatum.Unit = 'Seconds'
+              $MetricDatum.Value = $Metric.MetricValue
+              Try {
+                  Write-CWMetricData -Namespace 'Prime Number Testing Metrics' -MetricData $MetricDatum
+              } Catch [System.Exception] {
+                  Write-Output "Failed to publish metric $($Metric.MetricName) $_"
+                  Exit 1
+              }
+          }
+  - name: deleteInstance
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+        - '{{launchInstance4.InstanceId}}'
+      DesiredState: terminated
+      Force: true
+      CheckStateOnly: false
+    nextStep: deletePrimeNumberTestSecGroup
+  - name: deletePrimeNumberTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicySSM
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSecurityGroup
+      GroupId: '{{createPrimeNumberTestSecGroup.primeNumberTestGroupId}}'
+  - name: detachRolePolicySSM
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicyCW
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRolePolicyCW
+    action: aws:executeAwsApi
+    nextStep: deleteInlineRolePolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInlineRolePolicy
+    action: aws:executeAwsApi
+    nextStep: detachRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRolePolicy
+      PolicyName: PrimeNumberTest-{{automation:EXECUTION_ID}}
+      RoleName: PrimeNumberTest-{{automation:EXECUTION_ID}}
+  - name: detachRole
+    action: aws:executeAwsApi
+    nextStep: deleteRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: RemoveRoleFromInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteRole
+    action: aws:executeAwsApi
+    nextStep: deleteInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRole
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: detachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+  - name: detachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: disassociateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DetachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: disassociateRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DisassociateRouteTable
+      AssociationId: '{{associateRouteTable.associationId}}'
+  - name: deleteSubnet
+    action: aws:executeAwsApi
+    nextStep: deleteInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSubnet
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: deleteInternetGateway
+    action: aws:executeAwsApi
+    nextStep: deleteRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+  - name: deleteRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteVpc
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: deleteVpc
+    action: aws:executeAwsApi
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteVpc
+      VpcId: '{{createVpc.vpcId}}'

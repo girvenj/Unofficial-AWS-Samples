@@ -1,0 +1,625 @@
+---
+  description: Automation doc creates temp VPC, 1 public subnet, 1 IAM EC2 Role, 2 EC2 metal instances, and runs a CPU power consumption test. It then after the test has completed destroys everything it has built.
+  schemaVersion: '0.3'
+  parameters:
+    AmiName:
+      default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+      description: Image Name to launch EC2 instance
+      type: String
+    AutomationAssumeRole:
+      default: ''
+      description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+      type: String
+    AvailiblitytZone:
+      default: us-west-2a
+      description: The AZ ID or the Local Zone ID for a subnet.
+      type: String
+    InstanceTypeAMD:
+      default: m8a.metal-48xl
+      description: Instance type of the Instance
+      type: String
+      allowedValues:
+          - "c8a.metal-48xl"
+          - "c8a.metal-24xl"
+          - "m8a.metal-48xl"
+          - "m8a.metal-24xl"
+          - "r8a.metal-48xl"
+          - "r8a.metal-24xl"
+          - "x8aedz.metal-12xl"
+          - "x8aedz.metal-24xl"
+          - "c7a.metal-48xl"
+          - "m7a.metal-48xl"
+          - "r7a.metal-48xl"
+          - "c6a.metal"
+          - "m6a.metal"
+          - "r6a.metal"
+    InstanceTypeIntel:
+      default: m8i.metal-48xl
+      description: Instance type of the Instance
+      type: String
+      allowedValues:
+          - "r8g.metal-48xl"
+          - "c8g.metal-48xl"
+          - "m8g.metal-48xl"
+          - "c8i.metal-96xl"
+          - "c8i.metal-48xl"
+          - "m8i.metal-96xl"
+          - "m8i.metal-48xl"
+          - "r8i.metal-96xl"
+          - "r8i.metal-48xl"
+          - "c7i.metal-48xl"
+          - "c7i.metal-24xl"
+          - "m7i.metal-48xl"
+          - "m7i.metal-24xl"
+          - "r7i.metal-48xl"
+          - "r7i.metal-24xl"
+          - "c6i.metal"
+          - "m6i.metal"
+          - "r6i.metal"
+  mainSteps:
+    - name: createVpc
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: CreateVpc
+        CidrBlock: 10.0.0.0/24
+        TagSpecifications:
+          - ResourceType: vpc
+            Tags:
+              - Key: Name
+                Value: 'Power-Test-{{automation:EXECUTION_ID}}'
+      outputs:
+        - Name: vpcId
+          Selector: $.Vpc.VpcId
+          Type: String
+      nextStep: configureVpcDnsHost
+    - name: configureVpcDnsHost
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: ModifyVpcAttribute
+        EnableDnsHostnames:
+          Value: True
+        VpcId: '{{createVpc.vpcId}}'
+      nextStep: configureVpcDns
+    - name: configureVpcDns
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: ModifyVpcAttribute
+        EnableDnsSupport:
+          Value: True
+        VpcId: '{{createVpc.vpcId}}'
+      nextStep: createRouteTable
+    - name: createRouteTable
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: CreateRouteTable
+        VpcId: '{{createVpc.vpcId}}'
+        TagSpecifications:
+          - ResourceType: route-table
+            Tags:
+              - Key: Name
+                Value: 'Power-Test-{{automation:EXECUTION_ID}}'
+      outputs:
+        - Name: routeTableId
+          Selector: $.RouteTable.RouteTableId
+          Type: String
+      nextStep: createInternetGateway
+    - name: createInternetGateway
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: CreateInternetGateway
+        TagSpecifications:
+          - ResourceType: internet-gateway
+            Tags:
+              - Key: Name
+                Value: 'Power-Test-{{automation:EXECUTION_ID}}'
+      outputs:
+        - Name: internetGatewayId
+          Selector: $.InternetGateway.InternetGatewayId
+          Type: String
+      nextStep: attachInternetGateway
+    - name: attachInternetGateway
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: AttachInternetGateway
+        InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+        VpcId: '{{createVpc.vpcId}}'
+      nextStep: createRoute
+    - name: createRoute
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: CreateRoute
+        DestinationCidrBlock: 0.0.0.0/0
+        GatewayId: '{{createInternetGateway.internetGatewayId}}'
+        RouteTableId: '{{createRouteTable.routeTableId}}'
+      nextStep: createSubnet
+    - name: createSubnet
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: CreateSubnet
+        CidrBlock: 10.0.0.0/27
+        AvailabilityZone: '{{AvailiblitytZone}}'
+        VpcId: '{{createVpc.vpcId}}'
+        TagSpecifications:
+          - ResourceType: subnet
+            Tags:
+              - Key: Name
+                Value: 'Power-Test-{{automation:EXECUTION_ID}}'
+      outputs:
+        - Name: subnetId
+          Selector: $.Subnet.SubnetId
+          Type: String
+      nextStep: configureModifySubnetAttribute
+    - name: configureModifySubnetAttribute
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: ModifySubnetAttribute
+        MapPublicIpOnLaunch:
+          Value: True
+        SubnetId: '{{createSubnet.subnetId}}'
+      nextStep: associateRouteTable
+    - name: associateRouteTable
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: AssociateRouteTable
+        RouteTableId: '{{createRouteTable.routeTableId}}'
+        SubnetId: '{{createSubnet.subnetId}}'
+      outputs:
+        - Name: associationId
+          Selector: $.AssociationId
+          Type: String
+      nextStep: getAmiId
+    - name: getAmiId
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ssm
+        Api: GetParameter
+        Name: '{{AmiName}}'
+      outputs:
+        - Name: amiId
+          Selector: $.Parameter.Value
+          Type: String
+      nextStep: createInstanceRole
+    - name: createInstanceRole
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: CreateRole
+        AssumeRolePolicyDocument: >-
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}
+        RoleName: 'Power-Test-{{automation:EXECUTION_ID}}'
+      outputs:
+        - Name: instanceRoleName
+          Selector: $.Role.RoleName
+          Type: String
+      nextStep: putRolePolicy
+    - name: putRolePolicy
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: PutRolePolicy
+        PolicyDocument: >-
+          {
+              "Version": "2012-10-17",
+              "Statement": [
+                  {
+                      "Effect": "Allow",
+                      "Resource": "*",
+                      "Action": [
+                          "ec2:DescribeInstances",
+                          "cloudwatch:ListMetrics",
+                          "cloudwatch:PutMetricData",
+                          "cloudwatch:GetMetricStatistics"
+                      ]
+                  }
+              ]
+          }
+        PolicyName: 'Power-Test-{{automation:EXECUTION_ID}}'
+        RoleName: '{{createInstanceRole.instanceRoleName}}'
+      nextStep: attachManagedSSMPolicy
+    - name: attachManagedSSMPolicy
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: AttachRolePolicy
+        PolicyArn: 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        RoleName: '{{createInstanceRole.instanceRoleName}}'
+      nextStep: attachManagedCWPolicy
+    - name: attachManagedCWPolicy
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: AttachRolePolicy
+        PolicyArn: 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+        RoleName: '{{createInstanceRole.instanceRoleName}}'
+      nextStep: createInstanceProfile
+    - name: createInstanceProfile
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: CreateInstanceProfile
+        InstanceProfileName: Power-Test-{{automation:EXECUTION_ID}}
+      outputs:
+        - Name: instanceProfileArn
+          Selector: $.InstanceProfile.Arn
+          Type: String
+        - Name: instanceProfileName
+          Selector: $.InstanceProfile.InstanceProfileName
+          Type: String
+      nextStep: addInstanceRoleToProfile
+    - name: addInstanceRoleToProfile
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: AddRoleToInstanceProfile
+        InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+        RoleName: '{{createInstanceRole.instanceRoleName}}'
+      nextStep: createTestSecGroup
+    - name: createTestSecGroup
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: CreateSecurityGroup
+        GroupName: TestSecGroup-{{automation:EXECUTION_ID}}
+        Description: Security Group for Prime Number Test
+        VpcId: '{{createVpc.vpcId}}'
+      outputs:
+        - Name: TestGroupId
+          Selector: $.GroupId
+          Type: String
+      nextStep: waitForIam
+    - name: waitForIam
+      action: aws:sleep
+      inputs:
+        Duration: PT20S
+      nextStep: launchInstanceAMD
+    - name: launchInstanceAMD
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: RunInstances
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              KmsKeyId: alias/aws/ebs
+              VolumeSize: 30
+              VolumeType: gp3
+        IamInstanceProfile:
+          Name: '{{createInstanceProfile.instanceProfileName}}'
+        ImageId: '{{getAmiId.amiId}}'
+        InstanceType: '{{InstanceTypeAMD}}'
+        MaxCount: 1
+        MinCount: 1
+        Monitoring:
+          Enabled: true
+        SecurityGroupIds:
+          - '{{createTestSecGroup.TestGroupId}}'
+        SubnetId: '{{createSubnet.subnetId}}'
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: Power-Test-AMD-{{automation:EXECUTION_ID}}
+          - ResourceType: network-interface
+            Tags:
+              - Key: Name
+                Value: Power-Test-AMD-{{automation:EXECUTION_ID}}
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: Power-Test-AMD-{{automation:EXECUTION_ID}}
+      outputs:
+        - Name: InstanceIdAMD
+          Selector: '$.Instances[0].InstanceId'
+          Type: String
+      nextStep: launchInstanceIntel
+    - name: launchInstanceIntel
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: RunInstances
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              KmsKeyId: alias/aws/ebs
+              VolumeSize: 30
+              VolumeType: gp3
+        IamInstanceProfile:
+          Name: '{{createInstanceProfile.instanceProfileName}}'
+        ImageId: '{{getAmiId.amiId}}'
+        InstanceType: '{{InstanceTypeIntel}}'
+        MaxCount: 1
+        MinCount: 1
+        Monitoring:
+          Enabled: true
+        SecurityGroupIds:
+          - '{{createTestSecGroup.TestGroupId}}'
+        SubnetId: '{{createSubnet.subnetId}}'
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: Power-Test-Intel-{{automation:EXECUTION_ID}}
+          - ResourceType: network-interface
+            Tags:
+              - Key: Name
+                Value: Power-Test-Intel-{{automation:EXECUTION_ID}}
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: Power-Test-Intel-{{automation:EXECUTION_ID}}
+      outputs:
+        - Name: InstanceIdIntel
+          Selector: '$.Instances[0].InstanceId'
+          Type: String
+      nextStep: waitForBoot
+    - name: waitForBoot
+      action: aws:sleep
+      inputs:
+        Duration: PT2M
+      nextStep: setupInstance
+    - name: setupInstance
+      action: aws:runCommand
+      timeoutSeconds: 3600
+      inputs:
+        CloudWatchOutputConfig:
+          CloudWatchLogGroupName: /aws/SSMAutomation/Power-Test
+          CloudWatchOutputEnabled: true
+        DocumentName: AWS-RunShellScript
+        InstanceIds:
+          - '{{launchInstanceAMD.InstanceIdAMD}}'
+          - '{{launchInstanceIntel.InstanceIdIntel}}'
+        Parameters:
+          commands: |-
+            #!/bin/bash
+
+            echo "Installing prerequisites."
+            sudo apt-get update &>/dev/null
+            sudo apt install -y unzip curl &>/dev/null
+            sudo apt-get install -y linux-tools-common linux-tools-generic msr-tools stress-ng &>/dev/null
+            sudo modprobe msr &>/dev/null
+            sudo chmod o+r /dev/cpu/*/msr &>/dev/null || true
+            sudo cpupower frequency-set -g performance &>/dev/null
+            sudo apt install -y python3 python3-pip unzip &>/dev/null
+            sudo curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" &>/dev/null
+            sudo unzip -q awscliv2.zip &>/dev/null
+            sudo ./aws/install &>/dev/null
+
+            lsmod | grep -q '^msr' || sudo modprobe msr &>/dev/null
+
+            echo "Getting vCPU count and InstanceId."
+            CPUVendor=$(lscpu | grep "Vendor ID" | awk '{print $3}')
+            if [[ $CPUVendor == *'AMD'* ]]; then
+                InstanceId='{{launchInstanceAMD.InstanceIdAMD}}'
+            else
+                InstanceId='{{launchInstanceIntel.InstanceIdIntel}}'
+            fi
+
+            echo "Getting Region, vCPU count for instance $InstanceId ."
+            Token=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+            Region=$(curl -s -H "X-aws-ec2-metadata-token: $Token" http://169.254.169.254/latest/meta-data/placement/region)
+            CPUCount=$(sudo lscpu | awk '/^CPU\(s\):/ {print $2}')
+            CPUCountHalf=$((CPUCount / 2))
+
+            echo "Starting turbostat and stress-ng load testing and data collection."
+            ResultsFile=$(mktemp)
+            trap "rm -f $ResultsFile" EXIT
+            StartTimestamp=$(date -u --date='+2 minutes' +"%Y-%m-%dT%H:%M:%SZ")
+
+            sudo turbostat --quiet --Summary --show PkgWatt --interval 1 --num_iterations 600 | while read -r line; do
+                if [[ $line =~ ^[[:space:]]*[-0-9] ]]; then
+                    if [[ ! -f /tmp/stress_started ]]; then
+                        echo "Turbostat started. Sleeping 30s before launching stress-ng."
+                        sleep 30s
+                        touch /tmp/stress_started
+                        (sudo taskset -c 0-$((CPUCount-1)) stress-ng --quiet --cpu $CPUCount --timeout 10m --metrics-brief) > $ResultsFile 2>&1 &
+                        echo "Stress-ng launched in the background."
+                    fi
+
+                    PkgWatt=$(echo "scale=3; $(awk '{print $1}' <<< "$line") / $(lscpu | awk '/^Socket\(s\):/ {print $2}')" | bc)
+                    Timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+                    #echo "Publishing CPU wattage usage metric to CloudWatch. PkgWatt-$PkgWatt, Timestamp-$Timestamp"
+                    aws cloudwatch put-metric-data --region $Region --storage-resolution 1 --namespace "CPUPowerTest" --metric-data "[
+                        {
+                            \"MetricName\": \"PowerConsumptionWatts\",
+                            \"Value\": $PkgWatt,
+                            \"Unit\": \"None\",
+                            \"Dimensions\": [{\"Name\": \"InstanceId\", \"Value\": \"$InstanceId\"}],
+                            \"Timestamp\": \"$Timestamp\"
+                        }
+                    ]"
+                fi
+            done &
+            TurboStat_PID=$!
+
+            echo "Sleeping for 11M, letting turbostat and stress-ng run for 11 minutes to continue load testing and data collection."
+            sleep 11m
+
+            StopTimestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            echo "Killing stress-ng process."
+            pkill -9 stress-ng || true
+
+            echo "Sleeping for 1M, turbostat still collecting metrics."
+            sleep 1m
+
+            echo "Checking stress-ng results."
+            if [[ -s $ResultsFile ]]; then
+                Results=$(cat $ResultsFile)
+                PerfMetric=$(echo $Results | grep "cpu" | awk '{print $35}')
+            else
+                PerfMetric=0
+            fi
+
+            echo "Calculating performance per watt."
+            UsageWatts=$(aws cloudwatch get-metric-statistics --namespace "CPUPowerTest" --metric-name "PowerConsumptionWatts" --dimensions Name=InstanceId,Value=$InstanceId --statistics Maximum --region $Region --start-time $StartTimestamp --end-time $StopTimestamp --period 60 --query "max(Datapoints[*].Maximum)")
+            PerfPerWatt=$(echo "scale=2; $PerfMetric / $UsageWatts" | bc -l)
+            Timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            echo "Publishing PerformancePerWatt metric to CloudWatch."
+            #echo "Results-$Results, PerfMetric-$PerfMetric, UsageWatts-$UsageWatts, PerfPerWatt-$PerfPerWatt StartTimestamp-$StartTimestamp, StopTimestamp-$StopTimestamp"
+
+            aws cloudwatch put-metric-data --region $Region --storage-resolution 1 --namespace "CPUPowerTest" --metric-data "[
+                {
+                    \"MetricName\": \"PerformancePerWatt\",
+                    \"Value\": $PerfPerWatt,
+                    \"Unit\": \"None\",
+                    \"Dimensions\": [{\"Name\": \"InstanceId\", \"Value\": \"$InstanceId\"}],
+                    \"Timestamp\": \"$Timestamp\"
+                }
+            ]"
+
+            echo "Monitoring complete."
+      nextStep: deleteInstance
+    - name: deleteInstance
+      action: aws:changeInstanceState
+      inputs:
+        InstanceIds:
+          - '{{launchInstanceAMD.InstanceIdAMD}}'
+          - '{{launchInstanceIntel.InstanceIdIntel}}'
+        DesiredState: terminated
+        Force: true
+        CheckStateOnly: false
+      nextStep: deleteRolePolicy
+    - name: deleteRolePolicy
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: DeleteRolePolicy
+        PolicyName: 'Power-Test-{{automation:EXECUTION_ID}}'
+        RoleName: 'Power-Test-{{automation:EXECUTION_ID}}'
+      nextStep: detachRolePolicySSM
+    - name: detachRolePolicySSM
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: DetachRolePolicy
+        PolicyArn: 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        RoleName: '{{createInstanceRole.instanceRoleName}}'
+      nextStep: detachRolePolicyCW
+    - name: detachRolePolicyCW
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: DetachRolePolicy
+        PolicyArn: 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+        RoleName: '{{createInstanceRole.instanceRoleName}}'
+      nextStep: detachRole
+    - name: detachRole
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: RemoveRoleFromInstanceProfile
+        InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+        RoleName: '{{createInstanceRole.instanceRoleName}}'
+      nextStep: deleteRole
+    - name: deleteRole
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: DeleteRole
+        RoleName: '{{createInstanceRole.instanceRoleName}}'
+      nextStep: deleteInstanceProfile
+    - name: deleteInstanceProfile
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: iam
+        Api: DeleteInstanceProfile
+        InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      nextStep: detachInternetGateway
+    - name: detachInternetGateway
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: DetachInternetGateway
+        InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+        VpcId: '{{createVpc.vpcId}}'
+      nextStep: disassociateRouteTable
+    - name: disassociateRouteTable
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: DisassociateRouteTable
+        AssociationId: '{{associateRouteTable.associationId}}'
+      nextStep: deleteInternetGateway
+    - name: deleteInternetGateway
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: DeleteInternetGateway
+        InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      nextStep: deleteRouteTable
+    - name: deleteRouteTable
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: DeleteRouteTable
+        RouteTableId: '{{createRouteTable.routeTableId}}'
+      nextStep: deleteTestSecGroup
+    - name: deleteTestSecGroup
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: DeleteSecurityGroup
+        GroupId: '{{createTestSecGroup.TestGroupId}}'
+      nextStep: deleteSubnet
+    - name: deleteSubnet
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: DeleteSubnet
+        SubnetId: '{{createSubnet.subnetId}}'
+      nextStep: deleteVpc
+    - name: deleteVpc
+      action: aws:executeAwsApi
+      onFailure: Abort
+      inputs:
+        Service: ec2
+        Api: DeleteVpc
+        VpcId: '{{createVpc.vpcId}}'
