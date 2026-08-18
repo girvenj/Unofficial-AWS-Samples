@@ -495,11 +495,6 @@ mainSteps:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -y
           apt-get install -y bind9 bind9utils apparmor-utils wget
-          ARCH=$(dpkg --print-architecture)
-
-          # Install CloudWatch Agent
-          #wget "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/${ARCH}/latest/amazon-cloudwatch-agent.deb"
-          #dpkg -i -E ./amazon-cloudwatch-agent.deb
 
           # Disable AppArmor for BIND to allow custom log paths during testing
           aa-disable /etc/apparmor.d/usr.sbin.named
