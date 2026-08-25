@@ -1,0 +1,889 @@
+description: Creates Performance Test.
+schemaVersion: '0.3'
+parameters:
+  x86AmiName:
+    default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    description: Image Name to launch EC2 instances
+    type: String
+  ArmAmiName:
+    default: /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id
+    description: Image Name to launch EC2 instances
+    type: String
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  AvailabilityZone:
+    default: us-west-2a
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  x86InstanceType1:
+    default: r8a.xlarge
+    description: Target instance type
+    type: String
+  x86InstanceType2:
+    default: r8i.xlarge
+    description: Target instance type
+    type: String
+  x86LoadInstanceType1:
+    default: c8a.8xlarge
+    description: Load generator instance type
+    type: String
+  VectorCount:
+    default: "250000"
+    description: Vector Count
+    type: String
+  Clients:
+    default: "75"
+    description: Concurrent client connections
+    type: String
+  Threads:
+    default: "4"
+    description: Worker threads
+    type: String
+  Duration:
+    default: "180"
+    description: Duration in seconds
+    type: String
+mainSteps:
+  - name: createVpc
+    action: aws:executeAwsApi
+    nextStep: configureVpcDnsHost
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateVpc
+      CidrBlock: 10.0.0.0/24
+      TagSpecifications:
+        - ResourceType: vpc
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: vpcId
+        Selector: $.Vpc.VpcId
+        Type: String
+      - Name: vpcCIDR
+        Selector: $.Vpc.CidrBlock
+        Type: String
+  - name: configureVpcDnsHost
+    action: aws:executeAwsApi
+    nextStep: configureVpcDns
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsHostnames:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: configureVpcDns
+    action: aws:executeAwsApi
+    nextStep: createRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsSupport:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRouteTable
+    action: aws:executeAwsApi
+    nextStep: createInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: routeTableId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+  - name: createInternetGateway
+    action: aws:executeAwsApi
+    nextStep: attachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateInternetGateway
+      TagSpecifications:
+        - ResourceType: internet-gateway
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: internetGatewayId
+        Selector: $.InternetGateway.InternetGatewayId
+        Type: String
+  - name: attachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: createRoute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AttachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRoute
+    action: aws:executeAwsApi
+    nextStep: createSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: '{{createInternetGateway.internetGatewayId}}'
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: createSubnet
+    action: aws:executeAwsApi
+    nextStep: configureModifySubnetAttribute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: 10.0.0.0/27
+      AvailabilityZone: '{{AvailabilityZone}}'
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: subnetId
+        Selector: $.Subnet.SubnetId
+        Type: String
+  - name: configureModifySubnetAttribute
+    action: aws:executeAwsApi
+    nextStep: associateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifySubnetAttribute
+      MapPublicIpOnLaunch:
+        Value: true
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: associateRouteTable
+    action: aws:executeAwsApi
+    nextStep: getx86AmiId
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+    outputs:
+      - Name: associationId
+        Selector: $.AssociationId
+        Type: String
+  - name: getx86AmiId
+    action: aws:executeAwsApi
+    nextStep: getArmAmiId
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{x86AmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String
+  - name: getArmAmiId
+    action: aws:executeAwsApi
+    nextStep: createInstanceRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{ArmAmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String        
+  - name: createInstanceRole
+    action: aws:executeAwsApi
+    nextStep: attachManagedSSMPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateRole
+      AssumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}'
+      RoleName: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceRoleName
+        Selector: $.Role.RoleName
+        Type: String
+  - name: attachManagedSSMPolicy
+    action: aws:executeAwsApi
+    nextStep: attachManagedCWPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: attachManagedCWPolicy
+    action: aws:executeAwsApi
+    nextStep: putRolePolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: putRolePolicy
+    action: aws:executeAwsApi
+    nextStep: createInstanceProfile
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: PutRolePolicy
+      PolicyDocument: >-
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Resource": [ "*" ],
+                    "Action": [
+                        "ec2:DescribeInstanceTypes",
+                        "ec2:DescribeInstanceTypeOfferings"
+                    ]
+                }
+            ]
+        }
+      PolicyName: PgVector-Test-{{automation:EXECUTION_ID}}
+      RoleName: PgVector-Test-{{automation:EXECUTION_ID}}
+  - name: createInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: addInstanceRoleToProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateInstanceProfile
+      InstanceProfileName: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceProfileArn
+        Selector: $.InstanceProfile.Arn
+        Type: String
+      - Name: instanceProfileName
+        Selector: $.InstanceProfile.InstanceProfileName
+        Type: String
+  - name: addInstanceRoleToProfile
+    action: aws:executeAwsApi
+    nextStep: createTestSecGroup
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AddRoleToInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: testSecGroupIngress
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: PgVector-Test-SecGroup-{{automation:EXECUTION_ID}}
+      Description: Security Group for PgVector Test
+      VpcId: '{{createVpc.vpcId}}'
+    outputs:
+      - Name: testGroupId
+        Selector: $.GroupId
+        Type: String
+  - name: testSecGroupIngress
+    action: aws:executeAwsApi
+    nextStep: waitForIam
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+      IpPermissions:
+        - FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: SSH TCP
+        - FromPort: 5432
+          ToPort: 5432
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: PG TCP
+        - FromPort: 5432
+          ToPort: 5432
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: PG UDP
+  - name: waitForIam
+    action: aws:sleep
+    nextStep: launchInstance1
+    isEnd: false
+    inputs:
+      Duration: PT20S
+  - name: launchInstance1
+    action: aws:executeAwsApi
+    nextStep: launchInstance2
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{x86InstanceType1}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{x86InstanceType1}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: launchInstance2
+    action: aws:executeAwsApi
+    nextStep: launchInstance3
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{x86InstanceType2}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{x86InstanceType2}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: launchInstance3
+    action: aws:executeAwsApi
+    nextStep: waitForBoot
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{x86LoadInstanceType1}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-Load-Instance-{{x86LoadInstanceType1}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: PgVector-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: waitForBoot
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+      DesiredState: running
+      Force: false
+      CheckStateOnly: true
+      FailOnUnexpectedStopped: true
+    nextStep: configureInstance
+  - name: configureInstance
+    action: aws:runCommand
+    timeoutSeconds: 1200
+    nextStep: waitForConfig
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/PgVector-Test-Setup
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+      Parameters:
+        commands: |-
+          #!/bin/bash
+          set -e
+
+          # 1. Suppress all interactive prompts (DEBIAN_FRONTEND + needrestart + dpkg)
+          export DEBIAN_FRONTEND=noninteractive
+          export NEEDRESTART_MODE=a
+          export NEEDRESTART_SUSPEND=1
+          APT_OPTS="-y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+
+          echo ">>> Updating system and adding PostgreSQL repository..."
+          apt-get update $APT_OPTS
+          apt-get upgrade $APT_OPTS
+
+          # Added lsb-release to ensure lsb_release -cs command works on minimal AMIs
+          apt-get install $APT_OPTS curl ca-certificates gnupg lsb-release
+
+          # Setup PostgreSQL repository
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /usr/share/keyrings/postgresql-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+
+          echo ">>> Installing PostgreSQL 16 and pgvector..."
+          apt-get update $APT_OPTS
+          apt-get install $APT_OPTS postgresql-16 postgresql-16-pgvector
+
+          echo ">>> Dynamically calculating memory for pgvector tuning..."
+          TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+          TOTAL_MEM_MB=$((TOTAL_MEM_KB / 1024))
+          SHARED_BUFFERS=$((TOTAL_MEM_MB / 4))
+          EFF_CACHE=$((TOTAL_MEM_MB * 3 / 4))
+          MAINT_MEM=$((TOTAL_MEM_MB / 3))
+
+          if [ "$MAINT_MEM" -gt 4096 ]; then MAINT_MEM=4096; fi
+
+          echo ">>> Configuring PostgreSQL..."
+          PG_CONF="/etc/postgresql/16/main/postgresql.conf"
+          PG_HBA="/etc/postgresql/16/main/pg_hba.conf"
+
+          sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/g" $PG_CONF
+
+          cat <<EOF >> $PG_CONF
+          # --- Auto-Tuned pgvector Settings ---
+          shared_buffers = '${SHARED_BUFFERS}MB'
+          maintenance_work_mem = '${MAINT_MEM}MB'
+          work_mem = '64MB'
+          max_connections = 1000
+          random_page_cost = 1.1
+          effective_cache_size = '${EFF_CACHE}MB'
+          EOF
+
+          echo "host    all             all             0.0.0.0/0               scram-sha-256" >> $PG_HBA
+
+          echo ">>> Restarting PostgreSQL and initializing database..."
+          systemctl restart postgresql
+
+          # Run PSQL commands as the postgres user
+          sudo -u postgres psql -c "CREATE USER benchuser WITH PASSWORD 'benchpassword';"
+          sudo -u postgres psql -c "CREATE DATABASE vectordb OWNER benchuser;"
+          sudo -u postgres psql -d vectordb -c "CREATE EXTENSION vector;"
+
+          DB_IP=$(hostname -I | awk '{print $1}')
+          echo "=========================================================="
+          echo "DATABASE SETUP COMPLETE!"
+          echo "Database IP: $DB_IP"
+          echo "=========================================================="
+  - name: waitForConfig
+    action: aws:sleep
+    nextStep: startTest
+    isEnd: false
+    inputs:
+      Duration: PT1M
+  - name: startTest
+    action: aws:runCommand
+    timeoutSeconds: 10800
+    nextStep: deleteInstance
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/PgVector-Test-Run
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchInstance3.InstanceId}}'
+      Parameters:
+        commands: |-
+          #!/bin/bash
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+
+          # AWS SSM often starts in restricted directories; move to /tmp to be safe
+          cd /tmp
+
+          # Define Target Private IPs in an array
+          TARGET_INSTANCES=(
+            "{{launchInstance1.InstancePrivateIP}}|{{launchInstance1.InstanceType}}"
+            "{{launchInstance2.InstancePrivateIP}}|{{launchInstance2.InstanceType}}"
+          )
+
+          DB_USER="benchuser"
+          export PGPASSWORD="benchpassword"
+          DB_NAME="vectordb"
+
+          # Adjust this variable to 1000000 for the full 1M dataset. 
+          VECTOR_COUNT={{VectorCount}}
+
+          echo ">>> Setup Step 1: Installing dependencies..."
+          echo "=========================================================="
+          sudo apt-get update -y > /dev/null
+          #sudo apt-get full-upgrade -y > /dev/null
+
+          # blunt-force installing full postgresql suite guarantees pgbench is present
+          sudo apt-get install -y postgresql postgresql-contrib postgresql-client python3-pip python3-venv wget > /dev/null
+
+          # Verify installation to ensure psql and pgbench are ready
+          psql --version
+          pgbench --version
+
+          echo ">>> Setup Step 2: Downloading standard SIFT dataset..."
+          echo "=========================================================="
+          #wget -nc -q --show-progress http://ann-benchmarks.com/sift-128-euclidean.hdf5
+          wget -nc -q --show-progress http://ann-benchmarks.com/gist-960-euclidean.hdf5 
+
+          echo ">>> Setup Step 3: Extracting vectors to CSV for fast ingestion..."
+          echo "=========================================================="
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install -q h5py
+
+          cat << 'EOF' > extract.py
+          import h5py
+          import csv
+          import sys
+
+          limit = int(sys.argv[1])
+          print(f"Extracting {limit} base vectors and 1000 queries...")
+
+          #f = h5py.File('sift-128-euclidean.hdf5', 'r')
+          f = h5py.File('gist-960-euclidean.hdf5', 'r')
+
+          with open('base.csv', 'w', newline='') as out:
+              writer = csv.writer(out)
+              for i, row in enumerate(f['train']):
+                  if i >= limit: break
+                  writer.writerow(['[' + ','.join(map(str, row)) + ']'])
+
+          with open('queries.csv', 'w', newline='') as out:
+              writer = csv.writer(out)
+              for i, row in enumerate(f['test']):
+                  if i >= 1000: break
+                  writer.writerow([i+1, '[' + ','.join(map(str, row)) + ']'])
+          EOF
+
+          python3 extract.py $VECTOR_COUNT
+          deactivate
+
+          echo ">>> Setup Step 3.5: Preparing pgbench script..."
+          echo "=========================================================="
+
+          cat << 'EOF' > vector_search.sql
+          \set qid random(1, 1000)
+          SET hnsw.ef_search = 100;
+          SELECT id FROM items ORDER BY embedding <-> (SELECT q_vec FROM query_vectors WHERE id = :qid) LIMIT 10;
+          EOF
+
+          # LOOP THROUGH ALL INSTANCES FOR DB SETUP AND LOAD TESTING
+
+          for TARGET in "${TARGET_INSTANCES[@]}"; do
+            # Split the "IP|Type" string into two variables
+            DB_HOST="${TARGET%%|*}"
+            DB_TYPE="${TARGET##*|}"
+            
+            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "$DB_TYPE" ]; then
+                continue
+            fi
+
+            echo ">>> STARTING SETUP AND TEST FOR INSTANCE: ${DB_TYPE}"
+            echo "=========================================================="
+
+            echo ">>> Waiting for Database ${DB_HOST} - ${DB_TYPE} to accept connections..."
+            echo "=========================================================="
+            until psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c '\q' 2>/dev/null; do
+              sleep 2
+            done
+
+            echo ">>> Test Step 1: Loading datasets into pgvector on ${DB_TYPE} ..."
+            echo "=========================================================="
+            psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "
+              DROP TABLE IF EXISTS items;
+              CREATE TABLE items (id bigserial PRIMARY KEY, embedding vector(960));
+              
+              DROP TABLE IF EXISTS query_vectors;
+              CREATE TABLE query_vectors (id serial PRIMARY KEY, q_vec vector(960));
+            " > /dev/null
+
+            psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "\copy items (embedding) FROM 'base.csv' WITH (FORMAT csv);" > /dev/null
+            psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "\copy query_vectors (id, q_vec) FROM 'queries.csv' WITH (FORMAT csv);" > /dev/null
+
+            echo ">>> Phase 5: Building HNSW Index on ${DB_TYPE} (Timing this operation)..."
+            echo "=========================================================="
+            START_TIME=$(date +%s)
+            psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "
+              CREATE INDEX ON items USING hnsw (embedding vector_l2_ops) WITH (m = 16, ef_construction = 64);
+            " > /dev/null
+            
+            END_TIME=$(date +%s)
+            echo "HNSW Index built in $((END_TIME - START_TIME)) seconds."
+
+            echo ">>> Test Step 2: Running Load Test against ${DB_TYPE} (Config, {{Clients}} concurrent clients, {{Threads}} Threads {{Duration}} seconds)..."
+            echo "=========================================================="
+            pgbench -h $DB_HOST -U $DB_USER -d $DB_NAME -n \
+              -c {{Clients}} \
+              -j {{Threads}} \
+              -T {{Duration}} \
+              -P 5 \
+              -f vector_search.sql
+
+            echo ">>> LOAD TEST COMPLETE FOR ${DB_TYPE}."
+            echo "=========================================================="
+          done
+
+          echo "ALL INSTANCES HAVE BEEN SUCCESSFULLY TESTED."
+          echo "=========================================================="
+  - name: deleteInstance
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+      DesiredState: terminated
+      Force: true
+      CheckStateOnly: false
+    nextStep: waitForTermination
+  - name: waitForTermination
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchInstance1.InstanceId}}'
+        - '{{launchInstance2.InstanceId}}'
+        - '{{launchInstance3.InstanceId}}'
+      DesiredState: terminated
+      CheckStateOnly: true
+    nextStep: deleteTestSecGroup
+  - name: deleteTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicySSM
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSecurityGroup
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+  - name: detachRolePolicySSM
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicyCW
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRolePolicyCW
+    action: aws:executeAwsApi
+    nextStep: deleteInlineRolePolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInlineRolePolicy
+    action: aws:executeAwsApi
+    nextStep: detachRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRolePolicy
+      PolicyName: PgVector-Test-{{automation:EXECUTION_ID}}
+      RoleName: PgVector-Test-{{automation:EXECUTION_ID}}
+  - name: detachRole
+    action: aws:executeAwsApi
+    nextStep: deleteRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: RemoveRoleFromInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteRole
+    action: aws:executeAwsApi
+    nextStep: deleteInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRole
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: detachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+  - name: detachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: disassociateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DetachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: disassociateRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DisassociateRouteTable
+      AssociationId: '{{associateRouteTable.associationId}}'
+  - name: deleteSubnet
+    action: aws:executeAwsApi
+    nextStep: deleteInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSubnet
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: deleteInternetGateway
+    action: aws:executeAwsApi
+    nextStep: deleteRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+  - name: deleteRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteVpc
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: deleteVpc
+    action: aws:executeAwsApi
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteVpc
+      VpcId: '{{createVpc.vpcId}}'
