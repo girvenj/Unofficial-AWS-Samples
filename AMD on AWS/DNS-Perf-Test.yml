@@ -1,0 +1,1197 @@
+description: Automated end-to-end performance testing for Microsoft DNS.
+schemaVersion: '0.3'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  AvailabilityZone:
+    default: us-west-2a
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  x86AmiName:
+    default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
+    description: Image Name to launch EC2 instances
+    type: String
+  LoadX86InstanceType:
+    default: c8a.16xlarge
+    description: Load generator instance type
+    type: String
+  TargetX86InstanceType:
+    default: r8a.2xlarge
+    description: Target instance type
+    type: String
+  DnsConcurrency:
+    default: "750"
+    description: Concurrent client connections
+    type: String
+  DnsRequestsPerTest:
+    default: "1000000"
+    description: Request Count
+    type: String
+mainSteps:
+  - name: createVpc
+    action: aws:executeAwsApi
+    nextStep: configureVpcDnsHost
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateVpc
+      CidrBlock: 10.0.0.0/24
+      TagSpecifications:
+        - ResourceType: vpc
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: vpcId
+        Selector: $.Vpc.VpcId
+        Type: String
+      - Name: vpcCIDR
+        Selector: $.Vpc.CidrBlock
+        Type: String
+  - name: configureVpcDnsHost
+    action: aws:executeAwsApi
+    nextStep: configureVpcDns
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsHostnames:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: configureVpcDns
+    action: aws:executeAwsApi
+    nextStep: createRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsSupport:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRouteTable
+    action: aws:executeAwsApi
+    nextStep: createInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: routeTableId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+  - name: createInternetGateway
+    action: aws:executeAwsApi
+    nextStep: attachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateInternetGateway
+      TagSpecifications:
+        - ResourceType: internet-gateway
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: internetGatewayId
+        Selector: $.InternetGateway.InternetGatewayId
+        Type: String
+  - name: attachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: createRoute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AttachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRoute
+    action: aws:executeAwsApi
+    nextStep: createSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: '{{createInternetGateway.internetGatewayId}}'
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: createSubnet
+    action: aws:executeAwsApi
+    nextStep: configureModifySubnetAttribute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: 10.0.0.0/27
+      AvailabilityZone: '{{AvailabilityZone}}'
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: subnetId
+        Selector: $.Subnet.SubnetId
+        Type: String
+  - name: configureModifySubnetAttribute
+    action: aws:executeAwsApi
+    nextStep: associateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifySubnetAttribute
+      MapPublicIpOnLaunch:
+        Value: true
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: associateRouteTable
+    action: aws:executeAwsApi
+    nextStep: getx86AmiId
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+    outputs:
+      - Name: associationId
+        Selector: $.AssociationId
+        Type: String
+  - name: getx86AmiId
+    action: aws:executeAwsApi
+    nextStep: createInstanceRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{x86AmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String   
+  - name: createInstanceRole
+    action: aws:executeAwsApi
+    nextStep: attachManagedSSMPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateRole
+      AssumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}'
+      RoleName: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceRoleName
+        Selector: $.Role.RoleName
+        Type: String
+  - name: attachManagedSSMPolicy
+    action: aws:executeAwsApi
+    nextStep: attachManagedCWPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: attachManagedCWPolicy
+    action: aws:executeAwsApi
+    nextStep: createInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: addInstanceRoleToProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateInstanceProfile
+      InstanceProfileName: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceProfileArn
+        Selector: $.InstanceProfile.Arn
+        Type: String
+      - Name: instanceProfileName
+        Selector: $.InstanceProfile.InstanceProfileName
+        Type: String
+  - name: addInstanceRoleToProfile
+    action: aws:executeAwsApi
+    nextStep: createTestSecGroup
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AddRoleToInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: testSecGroupIngress
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: Test-SecGroup-{{automation:EXECUTION_ID}}
+      Description: Security Group for Test
+      VpcId: '{{createVpc.vpcId}}'
+    outputs:
+      - Name: testGroupId
+        Selector: $.GroupId
+        Type: String
+  - name: testSecGroupIngress
+    action: aws:executeAwsApi
+    nextStep: waitForIam
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+      IpPermissions:
+        - FromPort: 53
+          ToPort: 53
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 53
+          ToPort: 53
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 88
+          ToPort: 88
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 88
+          ToPort: 88
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 123
+          ToPort: 123
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 135
+          ToPort: 135
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 389
+          ToPort: 389
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 389
+          ToPort: 389
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 445
+          ToPort: 445
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 445
+          ToPort: 445
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 464
+          ToPort: 464
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 464
+          ToPort: 464
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 636
+          ToPort: 636
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 3268
+          ToPort: 3269
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 5722
+          ToPort: 5722
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 5985
+          ToPort: 5986
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 9389
+          ToPort: 9389
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 49152
+          ToPort: 65535
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+        - FromPort: 49152
+          ToPort: 65535
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+  - name: waitForIam
+    action: aws:sleep
+    nextStep: launchTargetInstance
+    isEnd: false
+    inputs:
+      Duration: PT20S
+  - name: launchTargetInstance
+    action: aws:executeAwsApi
+    nextStep: launchLoadInstance
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{TargetX86InstanceType}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{TargetX86InstanceType}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: launchLoadInstance
+    action: aws:executeAwsApi
+    nextStep: waitForBoot
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 30
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{LoadX86InstanceType}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-Load-Instance-{{LoadX86InstanceType}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: DNS-Performance-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: waitForBoot
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+        - '{{launchLoadInstance.InstanceId}}'
+      DesiredState: running
+      Force: false
+      CheckStateOnly: true
+      FailOnUnexpectedStopped: true
+    nextStep: configureDnsInstance
+  - name: configureDnsInstance
+    action: aws:runCommand
+    timeoutSeconds: 172800
+    nextStep: waitForConfig
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/DNS-Performance-Test-Setup/{{launchTargetInstance.InstanceType}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
+
+          $Null = powercfg.exe /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+
+          $FeatureState = Get-WindowsFeature -Name 'System-DataArchiver', 'Windows-Defender' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty 'InstallState'
+          If ($FeatureState -contains 'Installed') {
+              $Null = Uninstall-WindowsFeature -Name 'System-DataArchiver', 'Windows-Defender' -ErrorAction Stop
+              Exit 3010
+          }
+
+          $RegistryItems = @(
+              @{
+                  Name         = 'SchUseStrongCrypto'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\.NETFramework\v4.0.30319'
+                  Value        = '1'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'SchUseStrongCrypto'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319'
+                  Value        = '1'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'HideFirstRunExperience'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge'
+                  Value        = '1'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'TcpTimedWaitDelay'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+                  Value        = '30'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'MaxUserPort'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+                  Value        = '65534'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'FastSendDatagramThreshold'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\AFD\Parameters'
+                  Value        = '65536'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'SocketPoolSize'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\DNS\Parameters'
+                  Value        = '10000'
+                  PropertyType = 'DWORD'
+              }
+          )
+
+
+
+          $Null = Get-CimInstance -ClassName 'Win32_Volume' -Filter "DriveLetter='C:'" -ErrorAction Stop | Set-CimInstance -Arguments @{ IndexingEnabled = $False }
+
+          $NetAdapter = Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1
+          Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword "*JumboPacket" -RegistryValue 9015
+          Set-NetIPInterface -InterfaceIndex $NetAdapter.ifIndex -AddressFamily IPv4 -NlMtuBytes 9001
+          Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword '*ReceiveBuffers' -Registryvalue 8192
+          Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword '*TransmitBuffers' -Registryvalue 1024
+          Set-NetAdapterAdvancedProperty -Name "*" -RegistryKeyword "*InterruptModeration" -RegistryValue "Disabled"
+          Set-NetAdapterRss -Name "*" -BaseProcessorGroup 0 -BaseProcessorNumber 2 -MaxProcessorNumber 7 -Profile NUMAScalingStatic
+          Restart-NetAdapter -Name * -ErrorAction Stop
+
+          $RequiredFeatures = @('DNS')
+          $MissingFeatures = Get-WindowsFeature -Name $RequiredFeatures | Where-Object InstallState -ne 'Installed'
+          If ($MissingFeatures) {
+              Try {
+                  $Null = Install-WindowsFeature -Name $RequiredFeatures -IncludeManagementTools -ErrorAction Stop
+              } Catch [System.Exception] {
+                  Write-Output "Failed to install Windows features $_"
+                  Exit 1
+              }
+          } Else {
+              Write-Output 'Required Windows features are already installed.'
+          }
+
+          Foreach ($RegistryItem in $RegistryItems) {
+              $KeyPresent = Test-Path -Path $RegistryItem.Path -ErrorAction SilentlyContinue
+              If (-not $KeyPresent) {
+                  Try {
+                      $Null = New-Item -Path $RegistryItem.Path -Force -ErrorAction Stop
+                  } Catch [System.Exception] {
+                      Write-Output "Failed to create registry item $($RegistryItem.Path) $_"
+                      Exit 1
+                  }
+              }
+              Try {
+                  $Null = New-ItemProperty @RegistryItem -Force -ErrorAction Stop
+              } Catch [System.Exception] {
+                  Write-Output "Failed to create registry item propertie $($RegistryItem.Name) $_"
+                  Exit 1
+              }
+          }
+
+          $DomainName = 'example.local'
+          $TotalRecords = {{DnsRequestsPerTest}}
+          $ZoneFilePath = "C:\Windows\System32\dns\$DomainName.dns"
+
+          Write-Output "Creating new file-backed DNS zone: $DomainName..."
+          Add-DnsServerPrimaryZone -Name $DomainName -ZoneFile "$DomainName.dns" -ErrorAction Stop
+
+          Write-Output "Stopping DNS Service to release file lock..."
+          Stop-Service -Name DNS -Force
+
+          Write-Output "Streaming $TotalRecords records directly to $ZoneFilePath..."
+          $Stream = [System.IO.StreamWriter]::new($ZoneFilePath, $true)
+
+          for ($i = 1; $i -le $TotalRecords; $i++) {
+              $octet3 = ([math]::Floor($i / 254) % 254) + 1
+              $octet4 = ($i % 254) + 1
+              $Stream.WriteLine("TestComputer$i IN A 10.1.$octet3.$octet4")
+          }
+
+          $Stream.Close()
+          $Stream.Dispose()
+
+          Write-Output "Restarting DNS Service to load records into memory..."
+          Start-Service -Name DNS
+          Write-Output "Dedicated performance zone creation complete."
+
+          Start-Process "shutdown.exe" -ArgumentList "/r /t 10 /f"
+  - name: waitForConfig
+    action: aws:sleep
+    nextStep: configureLoadInstance
+    isEnd: false
+    inputs:
+      Duration: PT5M
+  - name: configureLoadInstance
+    action: aws:runCommand
+    timeoutSeconds: 172800
+    nextStep: rebootLoadInstance
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/DNS-Performance-Test-Setup/{{launchLoadInstance.InstanceType}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchLoadInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
+          
+          $Null = powercfg.exe /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          
+          $Null = Install-WindowsFeature -Name 'RSAT-AD-Tools' -ErrorAction SilentlyContinue
+          
+          $FeatureState = Get-WindowsFeature -Name 'System-DataArchiver', 'Windows-Defender' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty 'InstallState'
+          If ($FeatureState -contains 'Installed') {
+              $Null = Uninstall-WindowsFeature -Name 'System-DataArchiver', 'Windows-Defender' -ErrorAction Stop
+              Exit 3010
+          }
+          
+          $RegistryItems = @(
+              @{
+                  Name = 'SchUseStrongCrypto'
+                  Path = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\.NETFramework\v4.0.30319'
+                  Value = '1'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name = 'SchUseStrongCrypto'
+                  Path = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319'
+                  Value = '1'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name = 'HideFirstRunExperience'
+                  Path = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge'
+                  Value = '1'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name = 'TcpTimedWaitDelay'
+                  Path = 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+                  Value = '30'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name = 'MaxUserPort'
+                  Path = 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+                  Value = '65534'
+                  PropertyType = 'DWORD'
+              },
+              @{
+                  Name         = 'FastSendDatagramThreshold'
+                  Path         = 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\AFD\Parameters'
+                  Value        = '65536'
+                  PropertyType = 'DWORD'
+              }
+          )
+          Foreach ($RegistryItem in $RegistryItems) {
+              $KeyPresent = Test-Path -Path $RegistryItem.Path -ErrorAction SilentlyContinue
+              If (-not $KeyPresent) {
+                  Try {
+                      $Null = New-Item -Path $RegistryItem.Path -Force -ErrorAction Stop
+                  } Catch [System.Exception] {
+                      Write-Output "Failed to create registry item $($RegistryItem.Path) $_"
+                      Exit 1
+                  }
+              }
+              Try {
+                  $Null = New-ItemProperty @RegistryItem -Force -ErrorAction Stop
+              } Catch [System.Exception] {
+                  Write-Output "Failed to create registry item propertie $($RegistryItem.Name) $_"
+                  Exit 1
+              }
+          }
+
+          Try {
+              $Null = Get-CimInstance -ClassName 'Win32_Volume' -Filter "DriveLetter='C:'" -ErrorAction Stop | Set-CimInstance -Arguments @{ IndexingEnabled = $False }
+          } Catch [System.Exception] {
+              Write-Output "Failed to disable indexing on C drive $_"
+              Exit 1
+          }
+
+          $TargetIP = "{{launchTargetInstance.InstancePrivateIP}}"
+          $Domain = 'example.local'
+          
+          $NetAdapter = Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1
+          Set-DnsClientServerAddress -InterfaceIndex $NetAdapter.ifIndex -ServerAddresses $TargetIP
+          Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword "*JumboPacket" -RegistryValue 9015
+          Set-NetIPInterface -InterfaceIndex $NetAdapter.ifIndex -AddressFamily IPv4 -NlMtuBytes 9001          
+          Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword '*ReceiveBuffers' -Registryvalue 8192
+          Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword '*TransmitBuffers' -Registryvalue 1024
+          Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword '*InterruptModeration' -RegistryValue 'Disabled'
+          Set-NetAdapterRss -Name * -BaseProcessorGroup 0 -BaseProcessorNumber 2 -MaxProcessorNumber 63 -Profile 'NUMAScalingStatic'
+
+          Restart-NetAdapter -Name * -ErrorAction Stop
+  - name: rebootLoadInstance
+    action: aws:executeAwsApi
+    nextStep: waitForLoadReboot
+    inputs:
+      Service: ec2
+      Api: RebootInstances
+      InstanceIds:
+        - '{{launchLoadInstance.InstanceId}}'
+  - name: waitForLoadReboot
+    action: aws:sleep
+    nextStep: startPerfTest
+    inputs:
+      Duration: PT1M
+  - name: startPerfTest
+    action: aws:runCommand
+    timeoutSeconds: 172800
+    nextStep: deleteInstance
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/DNS-Performance-Test-Run/{{launchTargetInstance.InstanceType}}
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchLoadInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          $Source = @"
+          using System;
+          using System.Diagnostics;
+          using System.Net;
+          using System.Net.Sockets;
+          using System.Threading;
+          using System.Threading.Tasks;
+
+          public class DnsTestEngine
+          {
+              private static object syncLock = new object();
+              private static int[] globalLatencyHistogram = new int[2001]; // Buckets 0ms to 2000ms
+              private static long globalMinTicks = long.MaxValue;
+              private static long globalMaxTicks = 0;
+              private static long globalTotalLatencyTicks = 0;
+
+              public static void RunTest(string targetIp, string domain, int totalRequests, int concurrency)
+              {
+                  IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse(targetIp), 53);
+                  
+                  Console.WriteLine("Phase 1: Pre-computing {{DnsRequestsPerTest}} unique DNS packets in memory...");
+                  byte[][] payloadPool = new byte[{{DnsRequestsPerTest}}][];
+                  for (int i = 0; i < {{DnsRequestsPerTest}}; i++)
+                  {
+                      string host = string.Format("TestComputer{0}.{1}", i + 1, domain);
+                      payloadPool[i] = GenerateDnsQuery(host, (ushort)i);
+                  }
+                  Console.WriteLine("Pre-computation complete. Starting performance test...\n");
+
+                  // Success / Status Counters
+                  int completed = 0;
+                  int timeouts = 0;
+                  int connectionResets = 0;
+                  int otherSocketErrors = 0;
+                  
+                  // DNS Protocol RCODE Counters
+                  int rcodeNoError = 0;
+                  int rcodeNxDomain = 0;
+                  int rcodeServFail = 0;
+                  int rcodeRefused = 0;
+                  int rcodeFormatError = 0;
+                  int idMismatches = 0;
+                  int truncatedPackets = 0;
+
+                  // Reset global metrics
+                  Array.Clear(globalLatencyHistogram, 0, globalLatencyHistogram.Length);
+                  globalMinTicks = long.MaxValue;
+                  globalMaxTicks = 0;
+                  globalTotalLatencyTicks = 0;
+
+                  double tickFrequency = (double)Stopwatch.Frequency;
+                  Stopwatch sw = Stopwatch.StartNew();
+
+                  Parallel.For(0, concurrency, new ParallelOptions { MaxDegreeOfParallelism = concurrency }, threadId =>
+                  {
+                      int queriesThisThread = totalRequests / concurrency;
+                      if (threadId == concurrency - 1)
+                      {
+                          queriesThisThread += totalRequests % concurrency;
+                      }
+
+                      byte[] receiveBuffer = new byte[4096];
+                      int poolIndex = threadId * (totalRequests / concurrency);
+
+                      // Thread-local latency tracking to eliminate lock contention during load
+                      int[] localHistogram = new int[2001];
+                      long threadMinTicks = long.MaxValue;
+                      long threadMaxTicks = 0;
+                      long threadTotalTicks = 0;
+
+                      try
+                      {
+                          using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+                          {
+                              socket.Connect(serverEndpoint);
+                              socket.ReceiveTimeout = 2000; // 2 second timeout window
+
+                              for (int i = 0; i < queriesThisThread; i++)
+                              {
+                                  byte[] currentPayload = payloadPool[poolIndex];
+                                  ushort expectedTxId = (ushort)((currentPayload[0] << 8) | currentPayload[1]);
+
+                                  long startTicks = Stopwatch.GetTimestamp();
+                                  try
+                                  {
+                                      socket.Send(currentPayload);
+                                      int received = socket.Receive(receiveBuffer);
+                                      long stopTicks = Stopwatch.GetTimestamp();
+
+                                      long elapsedTicks = stopTicks - startTicks;
+                                      threadTotalTicks += elapsedTicks;
+                                      if (elapsedTicks < threadMinTicks) threadMinTicks = elapsedTicks;
+                                      if (elapsedTicks > threadMaxTicks) threadMaxTicks = elapsedTicks;
+
+                                      // Calculate integer millisecond for histogram bucket
+                                      int elapsedMs = (int)((elapsedTicks * 1000) / tickFrequency);
+                                      if (elapsedMs < 0) elapsedMs = 0;
+                                      if (elapsedMs > 2000) elapsedMs = 2000;
+                                      localHistogram[elapsedMs]++;
+
+                                      // Validate Packet Header (12 bytes minimum)
+                                      if (received >= 12)
+                                      {
+                                          ushort receivedTxId = (ushort)((receiveBuffer[0] << 8) | receiveBuffer[1]);
+                                          if (receivedTxId != expectedTxId)
+                                          {
+                                              Interlocked.Increment(ref idMismatches);
+                                              continue;
+                                          }
+
+                                          // Check Truncation bit (TC) in Byte 2
+                                          if ((receiveBuffer[2] & 0x02) != 0)
+                                          {
+                                              Interlocked.Increment(ref truncatedPackets);
+                                          }
+
+                                          // Check RCODE (lowest 4 bits of Byte 3)
+                                          int rcode = receiveBuffer[3] & 0x0F;
+                                          switch (rcode)
+                                          {
+                                              case 0:
+                                                  Interlocked.Increment(ref rcodeNoError);
+                                                  Interlocked.Increment(ref completed);
+                                                  break;
+                                              case 3:
+                                                  Interlocked.Increment(ref rcodeNxDomain);
+                                                  Interlocked.Increment(ref completed); // Expected if domain is randomized
+                                                  break;
+                                              case 2:
+                                                  Interlocked.Increment(ref rcodeServFail);
+                                                  break;
+                                              case 5:
+                                                  Interlocked.Increment(ref rcodeRefused);
+                                                  break;
+                                              case 1:
+                                                  Interlocked.Increment(ref rcodeFormatError);
+                                                  break;
+                                              default:
+                                                  Interlocked.Increment(ref otherSocketErrors);
+                                                  break;
+                                          }
+                                      }
+                                      else
+                                      {
+                                          Interlocked.Increment(ref otherSocketErrors);
+                                      }
+                                  }
+                                  catch (SocketException sex)
+                                  {
+                                      if (sex.SocketErrorCode == SocketError.TimedOut)
+                                      {
+                                          Interlocked.Increment(ref timeouts);
+                                      }
+                                      else if (sex.SocketErrorCode == SocketError.ConnectionReset)
+                                      {
+                                          // ICMP Port 53 Unreachable returned by Windows
+                                          Interlocked.Increment(ref connectionResets);
+                                      }
+                                      else
+                                      {
+                                          Interlocked.Increment(ref otherSocketErrors);
+                                      }
+                                  }
+                                  catch
+                                  {
+                                      Interlocked.Increment(ref otherSocketErrors);
+                                  }
+
+                                  poolIndex++;
+                                  if (poolIndex >= {{DnsRequestsPerTest}}) poolIndex = 0;
+                              }
+                          }
+                      }
+                      catch
+                      {
+                          Interlocked.Add(ref otherSocketErrors, queriesThisThread);
+                      }
+
+                      // Merge thread telemetry into global telemetry
+                      lock (syncLock)
+                      {
+                          for (int h = 0; h < 2001; h++)
+                          {
+                              globalLatencyHistogram[h] += localHistogram[h];
+                          }
+                          globalTotalLatencyTicks += threadTotalTicks;
+                          if (threadMinTicks < globalMinTicks) globalMinTicks = threadMinTicks;
+                          if (threadMaxTicks > globalMaxTicks) globalMaxTicks = threadMaxTicks;
+                      }
+                  });
+
+                  sw.Stop();
+
+                  // Calculations
+                  double elapsedSec = sw.ElapsedMilliseconds / 1000.0;
+                  if (elapsedSec == 0) elapsedSec = 0.001;
+
+                  double throughput = completed / elapsedSec;
+                  int totalDrops = timeouts + connectionResets + otherSocketErrors + idMismatches + rcodeServFail + rcodeRefused + rcodeFormatError;
+                  double dropRate = (double)totalDrops / totalRequests * 100.0;
+
+                  // Latency Percentile Calculations
+                  int totalValidResponses = completed + rcodeServFail + rcodeRefused + rcodeFormatError;
+                  double avgLatMs = totalValidResponses > 0 ? ((globalTotalLatencyTicks * 1000.0) / tickFrequency) / totalValidResponses : 0;
+                  double minLatMs = globalMinTicks == long.MaxValue ? 0 : (globalMinTicks * 1000.0) / tickFrequency;
+                  double maxLatMs = (globalMaxTicks * 1000.0) / tickFrequency;
+
+                  int p50 = GetPercentile(0.50, totalValidResponses);
+                  int p90 = GetPercentile(0.90, totalValidResponses);
+                  int p95 = GetPercentile(0.95, totalValidResponses);
+                  int p99 = GetPercentile(0.99, totalValidResponses);
+
+                  // Render Comprehensive Console Summary
+                  Console.WriteLine("==================================================================");
+                  Console.WriteLine("           Windows Server DNS TCO Performance Report              ");
+                  Console.WriteLine("==================================================================");
+                  Console.WriteLine(string.Format("Target Server IP     : {0}", targetIp));
+                  Console.WriteLine(string.Format("Total Sent Queries   : {0:N0}", totalRequests));
+                  Console.WriteLine(string.Format("Concurrency Threads  : {0}", concurrency));
+                  Console.WriteLine(string.Format("Test Duration        : {0:F2} seconds", elapsedSec));
+                  Console.WriteLine("------------------------------------------------------------------");
+                  Console.WriteLine(string.Format("SUCCESSFUL QPS       : {0:F0} queries/sec", throughput));
+                  Console.WriteLine(string.Format("OVERALL DROP RATE    : {0:F3}%", dropRate));
+                  Console.WriteLine("------------------------------------------------------------------");
+                  Console.WriteLine("LATENCY DISTRIBUTION (Round-Trip Time)");
+                  Console.WriteLine(string.Format("  Min Latency        : {0:F2} ms", minLatMs));
+                  Console.WriteLine(string.Format("  Average Latency    : {0:F2} ms", avgLatMs));
+                  Console.WriteLine(string.Format("  50th Percentile    : ~{0} ms", p50));
+                  Console.WriteLine(string.Format("  90th Percentile    : ~{0} ms", p90));
+                  Console.WriteLine(string.Format("  95th Percentile    : ~{0} ms", p95));
+                  Console.WriteLine(string.Format("  99th Percentile    : ~{0} ms", p99));
+                  Console.WriteLine(string.Format("  Max Latency        : {0:F2} ms", maxLatMs));
+                  Console.WriteLine("------------------------------------------------------------------");
+                  Console.WriteLine("PACKET DROPS & NETWORK FAILURES");
+                  Console.WriteLine(string.Format("  Timeouts (Dropped) : {0:N0}", timeouts));
+                  Console.WriteLine(string.Format("  Connection Resets  : {0:N0} (ICMP Port Unreachable)", connectionResets));
+                  Console.WriteLine(string.Format("  ID Mismatches      : {0:N0} (Out-of-order/late)", idMismatches));
+                  Console.WriteLine(string.Format("  Truncated (TC=1)   : {0:N0}", truncatedPackets));
+                  Console.WriteLine(string.Format("  Other IO Errors    : {0:N0}", otherSocketErrors));
+                  Console.WriteLine("------------------------------------------------------------------");
+                  Console.WriteLine("DNS PROTOCOL RESPONSES (RCODE)");
+                  Console.WriteLine(string.Format("  NOERROR   (0)      : {0:N0}", rcodeNoError));
+                  Console.WriteLine(string.Format("  NXDOMAIN  (3)      : {0:N0}", rcodeNxDomain));
+                  Console.WriteLine(string.Format("  SERVFAIL  (2)      : {0:N0}", rcodeServFail));
+                  Console.WriteLine(string.Format("  REFUSED   (5)      : {0:N0}", rcodeRefused));
+                  Console.WriteLine(string.Format("  FORMERR   (1)      : {0:N0}", rcodeFormatError));
+                  Console.WriteLine("==================================================================");
+              }
+
+              private static int GetPercentile(double targetRatio, int totalCount)
+              {
+                  if (totalCount == 0) return 0;
+                  long targetCount = (long)(totalCount * targetRatio);
+                  long accumulated = 0;
+
+                  for (int i = 0; i < globalLatencyHistogram.Length; i++)
+                  {
+                      accumulated += globalLatencyHistogram[i];
+                      if (accumulated >= targetCount)
+                      {
+                          return i;
+                      }
+                  }
+                  return 2000;
+              }
+
+              private static byte[] GenerateDnsQuery(string qname, ushort txId)
+              {
+                  byte[] buffer = new byte[512];
+                  buffer[0] = (byte)(txId >> 8);
+                  buffer[1] = (byte)(txId & 0xFF);
+                  buffer[2] = 0x01; buffer[3] = 0x00;
+                  buffer[4] = 0x00; buffer[5] = 0x01;
+                  
+                  int pos = 12;
+                  foreach (string label in qname.Split('.'))
+                  {
+                      buffer[pos++] = (byte)label.Length;
+                      foreach (char c in label) { buffer[pos++] = (byte)c; }
+                  }
+                  
+                  buffer[pos++] = 0x00;
+                  buffer[pos++] = 0x00; buffer[pos++] = 0x01;
+                  buffer[pos++] = 0x00; buffer[pos++] = 0x01;
+                  
+                  byte[] exactSizeBuffer = new byte[pos];
+                  Array.Copy(buffer, exactSizeBuffer, pos);
+                  return exactSizeBuffer;
+              }
+          }
+          "@
+          
+          Add-Type -TypeDefinition $Source
+
+          $Domain = 'example.local'
+          $Username = 'Administrator'
+          $Password = 'P@ssw0rd123!'
+          $DnsConcurrency = {{DnsConcurrency}}
+          $DnsRequestsPerTest = {{DnsRequestsPerTest}}
+          $TargetIP = "{{launchTargetInstance.InstancePrivateIP}}"
+
+          Start-Sleep -Seconds 30
+
+          Write-Output "Executing DNS performance tests against {{launchTargetInstance.InstanceType}} - $Domain ($TargetIP)"
+          Write-Output "DNS Test (Port 53 UDP) - $DnsRequestsPerTest requests, $DnsConcurrency concurrency"
+          [DnsTestEngine]::RunTest($TargetIP, $Domain, $DnsRequestsPerTest, $DnsConcurrency)
+  - name: deleteInstance
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+        - '{{launchLoadInstance.InstanceId}}'
+      DesiredState: terminated
+      Force: true
+      CheckStateOnly: false
+    nextStep: waitForTermination
+  - name: waitForTermination
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+        - '{{launchLoadInstance.InstanceId}}'
+      DesiredState: terminated
+      CheckStateOnly: true
+    nextStep: deleteTestSecGroup
+  - name: deleteTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicySSM
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSecurityGroup
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+  - name: detachRolePolicySSM
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicyCW
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRolePolicyCW
+    action: aws:executeAwsApi
+    nextStep: detachRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRole
+    action: aws:executeAwsApi
+    nextStep: deleteRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: RemoveRoleFromInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteRole
+    action: aws:executeAwsApi
+    nextStep: deleteInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRole
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: detachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+  - name: detachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: disassociateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DetachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: disassociateRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DisassociateRouteTable
+      AssociationId: '{{associateRouteTable.associationId}}'
+  - name: deleteSubnet
+    action: aws:executeAwsApi
+    nextStep: deleteInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSubnet
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: deleteInternetGateway
+    action: aws:executeAwsApi
+    nextStep: deleteRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+  - name: deleteRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteVpc
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: deleteVpc
+    action: aws:executeAwsApi
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteVpc
+      VpcId: '{{createVpc.vpcId}}'
