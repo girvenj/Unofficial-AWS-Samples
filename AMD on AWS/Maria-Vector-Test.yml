@@ -1,0 +1,829 @@
+description: Creates Performance Test.
+schemaVersion: '0.3'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  AvailabilityZone:
+    default: us-west-2a
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  x86AmiName:
+    default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    description: Image Name to launch EC2 instances
+    type: String
+  LoadInstanceType:
+    default: c8a.16xlarge
+    description: Load generator instance type
+    type: String
+  TargetInstanceType:
+    default: r8a.2xlarge
+    description: Target instance type
+    type: String
+mainSteps:
+  - name: createVpc
+    action: aws:executeAwsApi
+    nextStep: configureVpcDnsHost
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateVpc
+      CidrBlock: 10.0.0.0/24
+      TagSpecifications:
+        - ResourceType: vpc
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: vpcId
+        Selector: $.Vpc.VpcId
+        Type: String
+      - Name: vpcCIDR
+        Selector: $.Vpc.CidrBlock
+        Type: String
+  - name: configureVpcDnsHost
+    action: aws:executeAwsApi
+    nextStep: configureVpcDns
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsHostnames:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: configureVpcDns
+    action: aws:executeAwsApi
+    nextStep: createRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsSupport:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRouteTable
+    action: aws:executeAwsApi
+    nextStep: createInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: routeTableId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+  - name: createInternetGateway
+    action: aws:executeAwsApi
+    nextStep: attachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateInternetGateway
+      TagSpecifications:
+        - ResourceType: internet-gateway
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: internetGatewayId
+        Selector: $.InternetGateway.InternetGatewayId
+        Type: String
+  - name: attachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: createRoute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AttachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRoute
+    action: aws:executeAwsApi
+    nextStep: createSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: '{{createInternetGateway.internetGatewayId}}'
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: createSubnet
+    action: aws:executeAwsApi
+    nextStep: configureModifySubnetAttribute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: 10.0.0.0/27
+      AvailabilityZone: '{{AvailabilityZone}}'
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: subnetId
+        Selector: $.Subnet.SubnetId
+        Type: String
+  - name: configureModifySubnetAttribute
+    action: aws:executeAwsApi
+    nextStep: associateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifySubnetAttribute
+      MapPublicIpOnLaunch:
+        Value: true
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: associateRouteTable
+    action: aws:executeAwsApi
+    nextStep: getx86AmiId
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+    outputs:
+      - Name: associationId
+        Selector: $.AssociationId
+        Type: String
+  - name: getx86AmiId
+    action: aws:executeAwsApi
+    nextStep: createInstanceRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{x86AmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String   
+  - name: createInstanceRole
+    action: aws:executeAwsApi
+    nextStep: attachManagedSSMPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateRole
+      AssumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}'
+      RoleName: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceRoleName
+        Selector: $.Role.RoleName
+        Type: String
+  - name: attachManagedSSMPolicy
+    action: aws:executeAwsApi
+    nextStep: attachManagedCWPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: attachManagedCWPolicy
+    action: aws:executeAwsApi
+    nextStep: createInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: addInstanceRoleToProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateInstanceProfile
+      InstanceProfileName: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceProfileArn
+        Selector: $.InstanceProfile.Arn
+        Type: String
+      - Name: instanceProfileName
+        Selector: $.InstanceProfile.InstanceProfileName
+        Type: String
+  - name: addInstanceRoleToProfile
+    action: aws:executeAwsApi
+    nextStep: createTestSecGroup
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AddRoleToInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: testSecGroupIngress
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: Test-SecGroup-{{automation:EXECUTION_ID}}
+      Description: Security Group for Test
+      VpcId: '{{createVpc.vpcId}}'
+    outputs:
+      - Name: testGroupId
+        Selector: $.GroupId
+        Type: String
+  - name: testSecGroupIngress
+    action: aws:executeAwsApi
+    nextStep: waitForIam
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+      IpPermissions:
+        - FromPort: 3306
+          ToPort: 3306
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: DNS
+        - FromPort: 3306
+          ToPort: 3306
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: DNS
+  - name: waitForIam
+    action: aws:sleep
+    nextStep: launchTargetInstance
+    isEnd: false
+    inputs:
+      Duration: PT20S
+  - name: launchTargetInstance
+    action: aws:executeAwsApi
+    nextStep: launchLoadInstance
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 128
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{TargetInstanceType}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: Test-{{TargetInstanceType}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: launchLoadInstance
+    action: aws:executeAwsApi
+    nextStep: waitForBoot
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 64
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{LoadInstanceType}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: Test-Load-Instance-{{LoadInstanceType}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: waitForBoot
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+        - '{{launchLoadInstance.InstanceId}}'
+      DesiredState: running
+      Force: false
+      CheckStateOnly: true
+      FailOnUnexpectedStopped: true
+    nextStep: configureTargetInstance_Bash
+  - name: configureTargetInstance_Bash
+    action: aws:runCommand
+    timeoutSeconds: 12000
+    nextStep: waitForConfig
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/MariaDB-Vector-Target-Setup
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          #!/bin/bash
+          export DEBIAN_FRONTEND=noninteractive
+
+          # 1. Add MariaDB 11.8 Repository for Native Vector Support
+          curl -LsS https://downloads.mariadb.com/MariaDB/mariadb_repo_setup | sudo bash -s -- --mariadb-server-version=11.8
+
+          # 2. Install MariaDB Server and Client
+          apt-get update -y
+          apt-get install -y mariadb-server mariadb-client
+
+          # 3. Dynamic Memory Tuning 
+          # Calculate 75% of total system RAM for InnoDB Buffer Pool in MB
+          BUFFER_POOL_MB=$(awk '/MemTotal/ {printf "%.0f", $2/1024 * 0.75}' /proc/meminfo)
+
+          cat <<EOF > /etc/mysql/mariadb.conf.d/99-vector-tuning.cnf
+          [mysqld]
+          bind-address = 0.0.0.0
+          innodb_buffer_pool_size = ${BUFFER_POOL_MB}M
+          innodb_log_file_size = 4G
+          innodb_flush_log_at_trx_commit = 2
+          max_connections = 1000
+          max_allowed_packet = 256M
+          innodb_write_io_threads = 16
+          innodb_read_io_threads = 16
+          EOF
+
+          # 4. Apply Configuration
+          systemctl restart mariadb
+          systemctl enable mariadb
+
+          # 5. Create Performance Test Database and Remote User
+          mariadb -u root -e "CREATE DATABASE IF NOT EXISTS vectordb;"
+          mariadb -u root -e "CREATE USER IF NOT EXISTS 'benchuser'@'%' IDENTIFIED BY 'benchpass';"
+          mariadb -u root -e "GRANT ALL PRIVILEGES ON vectordb.* TO 'benchuser'@'%';"
+          mariadb -u root -e "FLUSH PRIVILEGES;"
+  - name: waitForConfig
+    action: aws:sleep
+    nextStep: rebootLoadInstance
+    isEnd: false
+    inputs:
+      Duration: PT5M
+  - name: rebootLoadInstance
+    action: aws:changeInstanceState
+    nextStep: setupPerfTest
+    inputs:
+      InstanceIds:
+        - '{{launchLoadInstance.InstanceId}}'
+      DesiredState: running
+      Force: true
+      FailOnUnexpectedStopped: true
+  - name: setupPerfTest
+    action: aws:runCommand
+    timeoutSeconds: 10800
+    nextStep: startPerfTest
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/MariaDB-Vector-Load-Setup
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchLoadInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          #!/bin/bash
+          export DEBIAN_FRONTEND=noninteractive
+
+          # TARGET_IP must be passed dynamically via SSM parameters or metadata
+          TARGET_IP="{{launchTargetInstance.InstancePrivateIP}}"
+          TARGET_DB_INSTANCE_TYPE="{{launchTargetInstance.InstanceType}}"
+
+          # 1. Install System Dependencies
+          apt-get update -y
+          apt-get install -y python3-pip python3-venv git libmariadb-dev mariadb-client gcc jq
+
+          # 2. Install AWS Unified CloudWatch Agent
+          wget -q https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+          dpkg -i -E ./amazon-cloudwatch-agent.deb
+
+          # 3. Setup Python Virtual Environment and Install VectorDBBench
+          python3 -m venv /opt/vectordbbench
+          source /opt/vectordbbench/bin/activate
+          pip install --upgrade pip wheel
+          pip install vectordb-bench mariadb SQLAlchemy
+
+          # 4. Configure CloudWatch Agent for Performance Test Logs
+          mkdir -p /var/log/perftest
+          cat <<EOF > /opt/aws/amazon-cloudwatch-agent/bin/config.json
+          {
+            "agent": {
+              "run_as_user": "root"
+            },
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/var/log/perftest/results.log",
+                      "log_group_name": "/aws/SSMAutomation/MariaDB-Vector-Run",
+                      "log_stream_name": "$TARGET_DB_INSTANCE_TYPE"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+          EOF
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json
+
+          # 5. Execute Performance Test Pipeline
+          # Standard error and standard output are piped to the CW monitored file.
+          echo "Starting VectorDBBench targeting $TARGET_IP..." | tee -a /var/log/perftest/results.log
+  - name: startPerfTest
+    action: aws:runCommand
+    timeoutSeconds: 10800
+    nextStep: deleteInstance
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/MariaDB-Vector-Run
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchLoadInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          #!/bin/bash
+          set -e
+          TARGET_DB_IP="{{launchTargetInstance.InstancePrivateIP}}"
+
+          echo "Waiting for MariaDB at $TARGET_DB_IP to become healthy..."
+          while ! mysqladmin ping -h "$TARGET_DB_IP" -u benchuser -pbenchpass --silent; do
+              sleep 15
+          done
+
+          # 1. Install h5py and numpy
+          source /opt/vectordbbench/bin/activate
+          pip install numpy h5py
+
+          # 2. Resilient HDF5 Download
+          mkdir -p /opt/vectordbbench/data
+          cd /opt/vectordbbench/data
+          
+          echo "Downloading GIST-960 dataset..."
+          curl -LsS -O --retry 3 "http://ann-benchmarks.com/gist-960-euclidean.hdf5"
+          
+          if [ ! -f "gist-960-euclidean.hdf5" ]; then
+              echo "FATAL: HDF5 file not found. Download failed."
+              exit 1
+          fi
+
+          # 3. Create the Python Benchmarking Script
+          cat << 'EOF' > /opt/vectordbbench/run_gist_test.py
+          import mariadb
+          import sys
+          import time
+          import json
+          import h5py
+          import numpy as np
+          import concurrent.futures
+
+          TARGET_IP = sys.argv[1]
+
+          print("1. Loading GIST dataset into memory...", flush=True)
+          with h5py.File('/opt/vectordbbench/data/gist-960-euclidean.hdf5', 'r') as f:
+              NUM_VECTORS = 300000
+              base_vectors = np.array(f['train'][:NUM_VECTORS])
+              query_vectors = np.array(f['test'])
+
+          try:
+              conn = mariadb.connect(
+                  host=TARGET_IP,
+                  user="benchuser",
+                  password="benchpass",
+                  database="vectordb",
+                  port=3306,
+                  autocommit=True
+              )
+              cur = conn.cursor()
+          except Exception as e:
+              print(f"Connection failed: {e}", flush=True)
+              sys.exit(1)
+
+          print(f"2. Creating Base Table without Index for {NUM_VECTORS} records...", flush=True)
+          cur.execute("DROP TABLE IF EXISTS gist_docs;")
+          cur.execute("""
+              CREATE TABLE gist_docs (
+                  id INT PRIMARY KEY AUTO_INCREMENT,
+                  embedding VECTOR(960) NOT NULL
+              );
+          """)
+
+          print(f"3. Fast Batch Inserting {NUM_VECTORS} Vectors...", flush=True)
+          insert_start = time.time()
+          batch_size = 20000
+          
+          for i in range(0, len(base_vectors), batch_size):
+              batch = base_vectors[i:i+batch_size]
+              data = [("[" + ",".join(f"{x:.4f}" for x in vec) + "]",) for vec in batch]
+              cur.executemany("INSERT INTO gist_docs (embedding) VALUES (VEC_FromText(?))", data)
+              
+              if (i + batch_size) % 20000 == 0:
+                  print(f"Loaded {i + batch_size}/{NUM_VECTORS} vectors...", flush=True)
+                  
+          insert_end = time.time()
+          print(f"Data Load Complete: {insert_end - insert_start:.2f} seconds", flush=True)
+
+          print("4. Building HNSW Vector Index in Bulk...", flush=True)
+          index_start = time.time()
+          cur.execute("ALTER TABLE gist_docs ADD VECTOR INDEX (embedding) M=16 DISTANCE=euclidean;")
+          index_end = time.time()
+          print(f"Index Build Time: {index_end - index_start:.2f} seconds", flush=True)
+
+          print("Pre-warming buffer pool...", flush=True)
+          cur.execute("ANALYZE TABLE gist_docs;")
+          time.sleep(10)
+
+          print("5. Pre-formatting query vectors to bypass Python GIL...", flush=True)
+          query_count = 100000
+          concurrency_workers = 48
+
+          # Safely loop test vectors and format as strings outside the execution timer
+          test_queries_raw = [query_vectors[i % len(query_vectors)] for i in range(query_count)]
+          test_queries_str = ["[" + ",".join(f"{x:.4f}" for x in q) + "]" for q in test_queries_raw]
+
+          # Chunk queries so each process handles a dedicated batch over a single connection
+          chunk_size = max(1, query_count // concurrency_workers)
+          chunks = [test_queries_str[i:i + chunk_size] for i in range(0, len(test_queries_str), chunk_size)]
+
+          def execute_query_batch(queries):
+              # One connection per process
+              worker_conn = mariadb.connect(
+                  host=TARGET_IP,
+                  user="benchuser",
+                  password="benchpass",
+                  database="vectordb",
+                  port=3306,
+                  autocommit=True
+              )
+              worker_cur = worker_conn.cursor()
+              
+              latencies = []
+              for q_str in queries:
+                  start_t = time.time()
+                  worker_cur.execute("SELECT id, VEC_DISTANCE_EUCLIDEAN(embedding, VEC_FromText(?)) as dist FROM gist_docs ORDER BY dist LIMIT 10;", (q_str,))
+                  worker_cur.fetchall()
+                  latencies.append(time.time() - start_t)
+                  
+              worker_cur.close()
+              worker_conn.close()
+              return latencies
+
+          print(f"6. Executing Multi-Process Search Benchmark across {concurrency_workers} workers...", flush=True)
+          search_start = time.time()
+          all_latencies = []
+
+          # ProcessPoolExecutor breaks the GIL and forces true multi-core utilization
+          with concurrent.futures.ProcessPoolExecutor(max_workers=concurrency_workers) as executor:
+              futures = [executor.submit(execute_query_batch, chunk) for chunk in chunks]
+              for future in concurrent.futures.as_completed(futures):
+                  all_latencies.extend(future.result())
+
+          search_end = time.time()
+
+          elapsed = search_end - search_start
+          qps = query_count / elapsed
+          avg_latency_ms = (sum(all_latencies) / len(all_latencies)) * 1000
+
+          results = {
+              "status": "success",
+              "instance_type": "{{launchTargetInstance.InstanceType}}",
+              "records_tested": NUM_VECTORS,
+              "queries_executed": query_count,
+              "concurrency": concurrency_workers,
+              "index_build_sec": round(index_end - index_start, 2),
+              "qps": round(qps, 2),
+              "avg_latency_ms": round(avg_latency_ms, 2),
+              "total_search_time_sec": round(elapsed, 2)
+          }
+
+          print(json.dumps(results, indent=2), flush=True)
+          EOF
+
+          echo "Initiating GIST-960 performance run..."
+          
+          mkdir -p /var/log/benchmark
+          
+          python3 /opt/vectordbbench/run_gist_test.py "$TARGET_DB_IP" 2>&1 | tee /var/log/benchmark/results.log
+
+          echo "Benchmark complete. Waiting 30 seconds for CloudWatch flush..."
+          sleep 30
+  - name: deleteInstance
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+        - '{{launchLoadInstance.InstanceId}}'
+      DesiredState: terminated
+      Force: true
+      CheckStateOnly: false
+    nextStep: waitForTermination
+  - name: waitForTermination
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+        - '{{launchLoadInstance.InstanceId}}'
+      DesiredState: terminated
+      CheckStateOnly: true
+    nextStep: deleteTestSecGroup
+  - name: deleteTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicySSM
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSecurityGroup
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+  - name: detachRolePolicySSM
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicyCW
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRolePolicyCW
+    action: aws:executeAwsApi
+    nextStep: detachRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRole
+    action: aws:executeAwsApi
+    nextStep: deleteRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: RemoveRoleFromInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteRole
+    action: aws:executeAwsApi
+    nextStep: deleteInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRole
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: detachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+  - name: detachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: disassociateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DetachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: disassociateRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DisassociateRouteTable
+      AssociationId: '{{associateRouteTable.associationId}}'
+  - name: deleteSubnet
+    action: aws:executeAwsApi
+    nextStep: deleteInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSubnet
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: deleteInternetGateway
+    action: aws:executeAwsApi
+    nextStep: deleteRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+  - name: deleteRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteVpc
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: deleteVpc
+    action: aws:executeAwsApi
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteVpc
+      VpcId: '{{createVpc.vpcId}}'
