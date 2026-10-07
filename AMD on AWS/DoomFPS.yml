@@ -1,0 +1,530 @@
+description: Creates Performance Test.
+schemaVersion: '0.3'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  AvailabilityZone:
+    default: us-west-2a
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  AmiName:
+    default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    description: Image Name to launch EC2 instances
+    type: String
+  TargetInstanceType:
+    default: r8a.large
+    description: Target instance type
+    type: String
+mainSteps:
+  - name: createVpc
+    action: aws:executeAwsApi
+    nextStep: configureVpcDnsHost
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateVpc
+      CidrBlock: 10.0.0.0/24
+      TagSpecifications:
+        - ResourceType: vpc
+          Tags:
+            - Key: Name
+              Value: Doom-FPS-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: vpcId
+        Selector: $.Vpc.VpcId
+        Type: String
+      - Name: vpcCIDR
+        Selector: $.Vpc.CidrBlock
+        Type: String
+  - name: configureVpcDnsHost
+    action: aws:executeAwsApi
+    nextStep: configureVpcDns
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsHostnames:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: configureVpcDns
+    action: aws:executeAwsApi
+    nextStep: createRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsSupport:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRouteTable
+    action: aws:executeAwsApi
+    nextStep: createInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: Doom-FPS-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: routeTableId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+  - name: createInternetGateway
+    action: aws:executeAwsApi
+    nextStep: attachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateInternetGateway
+      TagSpecifications:
+        - ResourceType: internet-gateway
+          Tags:
+            - Key: Name
+              Value: Doom-FPS-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: internetGatewayId
+        Selector: $.InternetGateway.InternetGatewayId
+        Type: String
+  - name: attachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: createRoute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AttachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRoute
+    action: aws:executeAwsApi
+    nextStep: createSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: '{{createInternetGateway.internetGatewayId}}'
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: createSubnet
+    action: aws:executeAwsApi
+    nextStep: configureModifySubnetAttribute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: 10.0.0.0/27
+      AvailabilityZone: '{{AvailabilityZone}}'
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: Doom-FPS-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: subnetId
+        Selector: $.Subnet.SubnetId
+        Type: String
+  - name: configureModifySubnetAttribute
+    action: aws:executeAwsApi
+    nextStep: associateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifySubnetAttribute
+      MapPublicIpOnLaunch:
+        Value: true
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: associateRouteTable
+    action: aws:executeAwsApi
+    nextStep: getAmiId
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+    outputs:
+      - Name: associationId
+        Selector: $.AssociationId
+        Type: String
+  - name: getAmiId
+    action: aws:executeAwsApi
+    nextStep: createInstanceRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{AmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String   
+  - name: createInstanceRole
+    action: aws:executeAwsApi
+    nextStep: attachManagedSSMPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateRole
+      AssumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}'
+      RoleName: Doom-FPS-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceRoleName
+        Selector: $.Role.RoleName
+        Type: String
+  - name: attachManagedSSMPolicy
+    action: aws:executeAwsApi
+    nextStep: attachManagedCWPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: attachManagedCWPolicy
+    action: aws:executeAwsApi
+    nextStep: createInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: addInstanceRoleToProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateInstanceProfile
+      InstanceProfileName: Doom-FPS-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceProfileArn
+        Selector: $.InstanceProfile.Arn
+        Type: String
+      - Name: instanceProfileName
+        Selector: $.InstanceProfile.InstanceProfileName
+        Type: String
+  - name: addInstanceRoleToProfile
+    action: aws:executeAwsApi
+    nextStep: createTestSecGroup
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AddRoleToInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: waitForIam
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: Doom-FPS-Test-SecGroup-{{automation:EXECUTION_ID}}
+      Description: Security Group for Test
+      VpcId: '{{createVpc.vpcId}}'
+    outputs:
+      - Name: testGroupId
+        Selector: $.GroupId
+        Type: String
+  - name: waitForIam
+    action: aws:sleep
+    nextStep: launchTargetInstance
+    isEnd: false
+    inputs:
+      Duration: PT20S
+  - name: launchTargetInstance
+    action: aws:executeAwsApi
+    nextStep: waitForBoot
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 32
+            VolumeType: gp3
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getAmiId.amiId}}'
+      InstanceType: '{{TargetInstanceType}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: Doom-FPS-Test-{{TargetInstanceType}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: Doom-FPS-Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: Doom-FPS-Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: waitForBoot
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      DesiredState: running
+      Force: false
+      CheckStateOnly: true
+      FailOnUnexpectedStopped: true
+    nextStep: startPerfTest
+  - name: startPerfTest
+    action: aws:runCommand
+    timeoutSeconds: 10800
+    nextStep: deleteInstance
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/Doom-FPS-Run
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunShellScript
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          #!/bin/bash
+          set -e
+
+          echo "================================================="
+          echo " Starting Headless Doom Benchmark via SSM..."
+          echo "================================================="
+
+          # 1. Update and install dependencies
+          echo "[1/3] Installing dependencies and game WAD from apt..."
+          export DEBIAN_FRONTEND=noninteractive
+          add-apt-repository multiverse -y || true 
+          apt-get update -qq
+          apt-get install -y -qq chocolate-doom xvfb doom-wad-shareware
+
+          WAD_PATH="/usr/share/games/doom/doom1.wad"
+          if [ ! -f "$WAD_PATH" ]; then
+              echo "Error: doom1.wad was not found at $WAD_PATH after install."
+              exit 1
+          fi
+
+          # 2. Run the benchmark in the background
+          echo "[2/3] Running timedemo benchmark..."
+          
+          # Start the game in the background (&) and grab its Process ID
+          xvfb-run -a chocolate-doom -iwad "$WAD_PATH" -timedemo demo1 -nosound > doom_benchmark.log 2>&1 &
+          DOOM_PID=$!
+
+          # Poll the log file every 2 seconds waiting for the completion text
+          TIMEOUT_COUNTER=0
+          while ! grep -q "gametics in" doom_benchmark.log; do
+              sleep 2
+              TIMEOUT_COUNTER=$((TIMEOUT_COUNTER + 2))
+              
+              # Failsafe: kill it if it takes longer than 120 seconds
+              if [ $TIMEOUT_COUNTER -ge 120 ]; then
+                  echo "Error: Benchmark timed out after 120 seconds."
+                  cat doom_benchmark.log
+                  kill $DOOM_PID || true
+                  exit 1
+              fi
+          done
+
+          # As soon as the text is found, the demo is done. Kill the hanging game process.
+          kill $DOOM_PID || true
+          echo " -> Benchmark complete."
+
+          # 3. Parse results
+          echo "[3/3] Parsing results..."
+          RESULT_LINE=$(grep -oE '[0-9]+ gametics in [0-9]+ realtics' doom_benchmark.log | tail -n 1)
+
+          if [ -z "$RESULT_LINE" ]; then
+              echo "Error: Could not find benchmark results. Raw log output:"
+              cat doom_benchmark.log
+              exit 1
+          fi
+
+          GAMETICS=$(echo "$RESULT_LINE" | awk '{print $1}')
+          REALTICS=$(echo "$RESULT_LINE" | awk '{print $4}')
+
+          # Calculate FPS using awk (35 engine ticks per second)
+          FPS=$(awk -v tics="$GAMETICS" -v real="$REALTICS" 'BEGIN { printf "%.2f", 35 * (tics / real) }')
+
+          echo ""
+          echo "================================================="
+          echo " "{{launchTargetInstance.InstanceType}}" DOOM FPS RESULTS"
+          echo "================================================="
+          echo " Gametics:   $GAMETICS"
+          echo " Realtics:   $REALTICS"
+          echo " Final FPS:  $FPS"
+          echo "================================================="
+  - name: deleteInstance
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      DesiredState: terminated
+      Force: true
+      CheckStateOnly: false
+    nextStep: waitForTermination
+  - name: waitForTermination
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      DesiredState: terminated
+      CheckStateOnly: true
+    nextStep: deleteTestSecGroup
+  - name: deleteTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicySSM
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSecurityGroup
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+  - name: detachRolePolicySSM
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicyCW
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRolePolicyCW
+    action: aws:executeAwsApi
+    nextStep: detachRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRole
+    action: aws:executeAwsApi
+    nextStep: deleteRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: RemoveRoleFromInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteRole
+    action: aws:executeAwsApi
+    nextStep: deleteInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRole
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: detachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+  - name: detachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: disassociateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DetachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: disassociateRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DisassociateRouteTable
+      AssociationId: '{{associateRouteTable.associationId}}'
+  - name: deleteSubnet
+    action: aws:executeAwsApi
+    nextStep: deleteInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSubnet
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: deleteInternetGateway
+    action: aws:executeAwsApi
+    nextStep: deleteRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+  - name: deleteRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteVpc
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: deleteVpc
+    action: aws:executeAwsApi
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteVpc
+      VpcId: '{{createVpc.vpcId}}'
