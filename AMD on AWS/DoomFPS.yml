@@ -1,4 +1,4 @@
-description: Creates Performance Test.
+description: Creates Doom Performance Test.
 schemaVersion: '0.3'
 parameters:
   AutomationAssumeRole:
@@ -334,7 +334,7 @@ mainSteps:
           set -e
 
           echo "================================================="
-          echo " Starting Headless Doom Benchmark via SSM..."
+          echo " Starting Headless Doom performance test via SSM..."
           echo "================================================="
 
           # 1. Update and install dependencies
@@ -350,23 +350,23 @@ mainSteps:
               exit 1
           fi
 
-          # 2. Run the benchmark in the background
-          echo "[2/3] Running timedemo benchmark..."
+          # 2. Run the performance test in the background
+          echo "[2/3] Running timedemo performance test..."
           
           # Start the game in the background (&) and grab its Process ID
-          xvfb-run -a chocolate-doom -iwad "$WAD_PATH" -timedemo demo1 -nosound > doom_benchmark.log 2>&1 &
+          xvfb-run -a chocolate-doom -iwad "$WAD_PATH" -timedemo demo1 -nosound > doom.log 2>&1 &
           DOOM_PID=$!
 
           # Poll the log file every 2 seconds waiting for the completion text
           TIMEOUT_COUNTER=0
-          while ! grep -q "gametics in" doom_benchmark.log; do
+          while ! grep -q "gametics in" doom.log; do
               sleep 2
               TIMEOUT_COUNTER=$((TIMEOUT_COUNTER + 2))
               
               # Failsafe: kill it if it takes longer than 120 seconds
               if [ $TIMEOUT_COUNTER -ge 120 ]; then
-                  echo "Error: Benchmark timed out after 120 seconds."
-                  cat doom_benchmark.log
+                  echo "Error: Performance test timed out after 120 seconds."
+                  cat doom.log
                   kill $DOOM_PID || true
                   exit 1
               fi
@@ -374,15 +374,15 @@ mainSteps:
 
           # As soon as the text is found, the demo is done. Kill the hanging game process.
           kill $DOOM_PID || true
-          echo " -> Benchmark complete."
+          echo " -> Performance test complete."
 
           # 3. Parse results
           echo "[3/3] Parsing results..."
-          RESULT_LINE=$(grep -oE '[0-9]+ gametics in [0-9]+ realtics' doom_benchmark.log | tail -n 1)
+          RESULT_LINE=$(grep -oE '[0-9]+ gametics in [0-9]+ realtics' doom.log | tail -n 1)
 
           if [ -z "$RESULT_LINE" ]; then
-              echo "Error: Could not find benchmark results. Raw log output:"
-              cat doom_benchmark.log
+              echo "Error: Could not find performance test results. Raw log output:"
+              cat doom.log
               exit 1
           fi
 
