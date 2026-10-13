@@ -1,0 +1,709 @@
+description: Creates Performance Test.
+schemaVersion: '0.3'
+parameters:
+  AutomationAssumeRole:
+    default: ''
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf. If no role is specified, Systems Manager Automation uses your IAM permissions to run this runbook.
+    type: String
+  AvailabilityZone:
+    default: us-west-2a
+    description: The AZ ID or the Local Zone ID for a subnet.
+    type: String
+  x86AmiName:
+    default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-SQL_2025_Enterprise
+    description: Image Name to launch EC2 instances
+    type: String
+  TargetInstanceType:
+    default: r8a.2xlarge
+    description: Target instance type
+    type: String
+mainSteps:
+  - name: createVpc
+    action: aws:executeAwsApi
+    nextStep: configureVpcDnsHost
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateVpc
+      CidrBlock: 10.0.0.0/24
+      TagSpecifications:
+        - ResourceType: vpc
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: vpcId
+        Selector: $.Vpc.VpcId
+        Type: String
+      - Name: vpcCIDR
+        Selector: $.Vpc.CidrBlock
+        Type: String
+  - name: configureVpcDnsHost
+    action: aws:executeAwsApi
+    nextStep: configureVpcDns
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsHostnames:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: configureVpcDns
+    action: aws:executeAwsApi
+    nextStep: createRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifyVpcAttribute
+      EnableDnsSupport:
+        Value: true
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRouteTable
+    action: aws:executeAwsApi
+    nextStep: createInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRouteTable
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: route-table
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: routeTableId
+        Selector: $.RouteTable.RouteTableId
+        Type: String
+  - name: createInternetGateway
+    action: aws:executeAwsApi
+    nextStep: attachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateInternetGateway
+      TagSpecifications:
+        - ResourceType: internet-gateway
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: internetGatewayId
+        Selector: $.InternetGateway.InternetGatewayId
+        Type: String
+  - name: attachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: createRoute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AttachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: createRoute
+    action: aws:executeAwsApi
+    nextStep: createSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: '{{createInternetGateway.internetGatewayId}}'
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: createSubnet
+    action: aws:executeAwsApi
+    nextStep: configureModifySubnetAttribute
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSubnet
+      CidrBlock: 10.0.0.0/27
+      AvailabilityZone: '{{AvailabilityZone}}'
+      VpcId: '{{createVpc.vpcId}}'
+      TagSpecifications:
+        - ResourceType: subnet
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: subnetId
+        Selector: $.Subnet.SubnetId
+        Type: String
+  - name: configureModifySubnetAttribute
+    action: aws:executeAwsApi
+    nextStep: associateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: ModifySubnetAttribute
+      MapPublicIpOnLaunch:
+        Value: true
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: associateRouteTable
+    action: aws:executeAwsApi
+    nextStep: getx86AmiId
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AssociateRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+    outputs:
+      - Name: associationId
+        Selector: $.AssociationId
+        Type: String
+  - name: getx86AmiId
+    action: aws:executeAwsApi
+    nextStep: createInstanceRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ssm
+      Api: GetParameter
+      Name: '{{x86AmiName}}'
+    outputs:
+      - Name: amiId
+        Selector: $.Parameter.Value
+        Type: String     
+  - name: createInstanceRole
+    action: aws:executeAwsApi
+    nextStep: attachManagedSSMPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateRole
+      AssumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}'
+      RoleName: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceRoleName
+        Selector: $.Role.RoleName
+        Type: String
+  - name: attachManagedSSMPolicy
+    action: aws:executeAwsApi
+    nextStep: attachManagedCWPolicy
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: attachManagedCWPolicy
+    action: aws:executeAwsApi
+    nextStep: createInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AttachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: addInstanceRoleToProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: CreateInstanceProfile
+      InstanceProfileName: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: instanceProfileArn
+        Selector: $.InstanceProfile.Arn
+        Type: String
+      - Name: instanceProfileName
+        Selector: $.InstanceProfile.InstanceProfileName
+        Type: String
+  - name: addInstanceRoleToProfile
+    action: aws:executeAwsApi
+    nextStep: createTestSecGroup
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: AddRoleToInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: createTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: testSecGroupIngress
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: CreateSecurityGroup
+      GroupName: Test-SecGroup-{{automation:EXECUTION_ID}}
+      Description: Security Group for Test
+      VpcId: '{{createVpc.vpcId}}'
+    outputs:
+      - Name: testGroupId
+        Selector: $.GroupId
+        Type: String
+  - name: testSecGroupIngress
+    action: aws:executeAwsApi
+    nextStep: waitForIam
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: AuthorizeSecurityGroupIngress
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+      IpPermissions:
+        - FromPort: 1433
+          ToPort: 1433
+          IpProtocol: tcp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: SQL
+        - FromPort: 1433
+          ToPort: 1433
+          IpProtocol: udp
+          IpRanges:
+            - CidrIp: '{{createVpc.vpcCIDR}}'
+              Description: SQL
+  - name: waitForIam
+    action: aws:sleep
+    nextStep: launchTargetInstance
+    isEnd: false
+    inputs:
+      Duration: PT20S
+  - name: launchTargetInstance
+    action: aws:executeAwsApi
+    nextStep: waitForBoot
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: RunInstances
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            KmsKeyId: alias/aws/ebs
+            VolumeSize: 512
+            VolumeType: gp3
+            Iops: 80000
+            Throughput: 2000
+      IamInstanceProfile:
+        Name: '{{createInstanceProfile.instanceProfileName}}'
+      ImageId: '{{getx86AmiId.amiId}}'
+      InstanceType: '{{TargetInstanceType}}'
+      MaxCount: 1
+      MinCount: 1
+      Monitoring:
+        Enabled: true
+      NetworkPerformanceOptions:
+        BandwidthWeighting: ebs-1
+      SecurityGroupIds:
+        - '{{createTestSecGroup.testGroupId}}'
+      SubnetId: '{{createSubnet.subnetId}}'
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: Name
+              Value: Test-{{TargetInstanceType}}-{{automation:EXECUTION_ID}}
+        - ResourceType: network-interface
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+        - ResourceType: volume
+          Tags:
+            - Key: Name
+              Value: Test-{{automation:EXECUTION_ID}}
+    outputs:
+      - Name: InstanceId
+        Selector: $.Instances[0].InstanceId
+        Type: String
+      - Name: InstanceType
+        Selector: $.Instances[0].InstanceType
+        Type: String
+      - Name: InstancePrivateIP
+        Selector: $.Instances[0].PrivateIpAddress
+        Type: String
+  - name: waitForBoot
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      DesiredState: running
+      Force: false
+      CheckStateOnly: true
+      FailOnUnexpectedStopped: true
+    nextStep: startPerfTest
+  - name: startPerfTest
+    action: aws:runCommand
+    timeoutSeconds: 10800
+    nextStep: deleteInstance
+    isEnd: false
+    inputs:
+      CloudWatchOutputConfig:
+        CloudWatchLogGroupName: /aws/SSMAutomation/SQL-Backup-Test-Run
+        CloudWatchOutputEnabled: true
+      DocumentName: AWS-RunPowerShellScript
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      Parameters:
+        commands: |-
+          $ErrorActionPreference = "Stop"
+
+          $targetDrive = "C:" 
+          $dbName = "RtoTestDB"
+          $backupDir = "$targetDrive\SQLBackups"
+          $sqlInstance = "localhost"
+
+          # 1. Define robust SQL execution wrapper and CPU tracker
+          function Invoke-RawSql {
+              param([string]$Query, [int]$Timeout = 14400)
+              $tempFile = [System.IO.Path]::GetTempFileName()
+              $Query | Out-File -FilePath $tempFile -Encoding utf8
+              $output = & sqlcmd -S $sqlInstance -E -i $tempFile -b -t $Timeout -C 2>&1
+              $exitCode = $LASTEXITCODE
+              Remove-Item $tempFile -Force
+              if ($exitCode -ne 0) {
+                  throw "SQL execution failed: $output"
+              }
+              return $output
+          }
+
+          function Get-SqlCpuSeconds {
+              return (Get-Process -Name "sqlservr").TotalProcessorTime.TotalSeconds
+          }
+
+          if (!(Test-Path $backupDir)) {
+              New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+          }
+
+          # 2. Pre-Allocate Database & Setup AES-256 Backup Certificate (Outside Population Timer)
+          $prepSql = @"
+          USE master;
+          IF NOT EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = '##MS_DatabaseMasterKey##')
+              CREATE MASTER KEY ENCRYPTION BY PASSWORD = 'Strong_Rto_Test_Password_2026!';
+
+          IF NOT EXISTS (SELECT * FROM sys.certificates WHERE name = 'RtoBackupCert')
+              CREATE CERTIFICATE RtoBackupCert WITH SUBJECT = 'RTO Benchmark AES-256 Certificate';
+
+          IF DB_ID('$dbName') IS NOT NULL
+          BEGIN
+              ALTER DATABASE [$dbName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+              DROP DATABASE [$dbName];
+          END
+          CREATE DATABASE [$dbName];
+          GO
+          ALTER DATABASE [$dbName] SET RECOVERY SIMPLE; 
+          GO
+
+          -- Pre-allocate files before starting the population stopwatch (tempdb sized to 20GB for WarmCache)
+          ALTER DATABASE [$dbName] MODIFY FILE (NAME = N'$dbName', SIZE = 220000MB);
+          ALTER DATABASE [$dbName] MODIFY FILE (NAME = N'${dbName}_log', SIZE = 10000MB);
+          ALTER DATABASE tempdb MODIFY FILE (NAME = tempdev, SIZE = 20480MB);
+          GO
+          "@
+          Invoke-RawSql -Query $prepSql
+
+          # 3. Populate 100GB Database (Structured GUID + text payload)
+          $populateSql = @"
+          USE [$dbName];
+          CREATE TABLE RtoMetrics (Id INT IDENTITY(1,1), Payload CHAR(8000));
+
+          CREATE TABLE #Staging (Payload CHAR(8000));
+          INSERT INTO #Staging (Payload) 
+          VALUES (REPLICATE(CONVERT(VARCHAR(36), NEWID()) + '_SQL_RTO_BENCHMARK_PAYLOAD_', 125));
+
+          DECLARE @d INT = 0;
+          WHILE @d < 17
+          BEGIN
+              INSERT INTO #Staging (Payload) 
+              SELECT STUFF(Payload, 1, 36, CONVERT(VARCHAR(36), NEWID())) FROM #Staging;
+              SET @d = @d + 1;
+          END
+
+          DECLARE @gb INT = 0;
+          WHILE @gb < 100
+          BEGIN
+              INSERT INTO RtoMetrics WITH (TABLOCK) (Payload) SELECT Payload FROM #Staging;
+              CHECKPOINT; 
+              SET @gb = @gb + 1;
+          END
+          "@
+
+          $popStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+          Invoke-RawSql -Query $populateSql
+          $popStopwatch.Stop()
+          $dbPopSeconds = [math]::Round($popStopwatch.Elapsed.TotalSeconds, 3)
+
+          # 4. Execute Full Backup (8 Stripes + COMPRESSION + CHECKSUM + AES_256 ENCRYPTION)
+          $backupSql = @"
+          BACKUP DATABASE [$dbName] 
+          TO DISK = '$backupDir\${dbName}_1.bak',
+            DISK = '$backupDir\${dbName}_2.bak',
+            DISK = '$backupDir\${dbName}_3.bak',
+            DISK = '$backupDir\${dbName}_4.bak',
+            DISK = '$backupDir\${dbName}_5.bak',
+            DISK = '$backupDir\${dbName}_6.bak',
+            DISK = '$backupDir\${dbName}_7.bak',
+            DISK = '$backupDir\${dbName}_8.bak'
+          WITH FORMAT, INIT, STATS = 1, COMPRESSION, CHECKSUM, 
+              ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = RtoBackupCert),
+              BUFFERCOUNT = 256, MAXTRANSFERSIZE = 4194304;
+          "@
+
+          $backupStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+          Invoke-RawSql -Query $backupSql
+          $backupStopwatch.Stop()
+          $backupSeconds = [math]::Round($backupStopwatch.Elapsed.TotalSeconds, 3)
+
+          # Flush RAM 
+          $flushSql = "DBCC DROPCLEANBUFFERS;"
+          Invoke-RawSql -Query $flushSql
+
+          # 5. Phase 1: Pure CPU/Memory Compute Test (VERIFYONLY with AES_256 Decryption + Decompression + Checksum)
+          $verifySql = @"
+          RESTORE VERIFYONLY
+          FROM DISK = '$backupDir\${dbName}_1.bak',
+              DISK = '$backupDir\${dbName}_2.bak',
+              DISK = '$backupDir\${dbName}_3.bak',
+              DISK = '$backupDir\${dbName}_4.bak',
+              DISK = '$backupDir\${dbName}_5.bak',
+              DISK = '$backupDir\${dbName}_6.bak',
+              DISK = '$backupDir\${dbName}_7.bak',
+              DISK = '$backupDir\${dbName}_8.bak'
+          WITH STATS = 1, CHECKSUM, BUFFERCOUNT = 256, MAXTRANSFERSIZE = 4194304;
+          "@
+
+          [System.GC]::Collect()
+
+          $verifyStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+          Invoke-RawSql -Query $verifySql
+          $verifyStopwatch.Stop()
+          $verifySeconds = [math]::Round($verifyStopwatch.Elapsed.TotalSeconds, 3)
+
+          # Take Database OFFLINE and Flush RAM
+          $offlineSql = @"
+          ALTER DATABASE [$dbName] SET OFFLINE WITH ROLLBACK IMMEDIATE;
+          DBCC DROPCLEANBUFFERS;
+          "@
+          Invoke-RawSql -Query $offlineSql
+
+          # 6. Phase 2: Physical Restore + OS-Level Multi-Thread CPU Tracking
+          $restoreSql = @"
+          RESTORE DATABASE [$dbName] 
+          FROM DISK = '$backupDir\${dbName}_1.bak',
+              DISK = '$backupDir\${dbName}_2.bak',
+              DISK = '$backupDir\${dbName}_3.bak',
+              DISK = '$backupDir\${dbName}_4.bak',
+              DISK = '$backupDir\${dbName}_5.bak',
+              DISK = '$backupDir\${dbName}_6.bak',
+              DISK = '$backupDir\${dbName}_7.bak',
+              DISK = '$backupDir\${dbName}_8.bak'
+          WITH REPLACE, RECOVERY, STATS = 1, CHECKSUM, BUFFERCOUNT = 256, MAXTRANSFERSIZE = 4194304;
+          "@
+
+          [System.GC]::Collect()
+
+          $cpuBeforeRestore = Get-SqlCpuSeconds
+          $restoreStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+          Invoke-RawSql -Query $restoreSql
+          $restoreStopwatch.Stop()
+          $cpuAfterRestore = Get-SqlCpuSeconds
+
+          $rtoSeconds = [math]::Round($restoreStopwatch.Elapsed.TotalSeconds, 3)
+          $restoreCpuSeconds = [math]::Round(($cpuAfterRestore - $cpuBeforeRestore), 3)
+
+          # 7. Phase 3: Post-Restore Warm Buffer Validation (Pin 16GB in RAM, then run MAXDOP 8 Checksum Scan)
+          $warmCacheSql = @"
+          USE [$dbName];
+          IF OBJECT_ID('tempdb.dbo.WarmCache') IS NOT NULL DROP TABLE tempdb.dbo.WarmCache;
+
+          -- Materialize 2,000,000 rows (~16GB) into tempdb so it persists across sqlcmd sessions
+          SELECT TOP (2000000) Id, Payload INTO tempdb.dbo.WarmCache FROM RtoMetrics;
+
+          -- Force a read scan to guarantee all 16GB of pages are pinned in the 64GB RAM Buffer Pool
+          SELECT COUNT_BIG(*) FROM tempdb.dbo.WarmCache;
+          "@
+          Invoke-RawSql -Query $warmCacheSql
+
+          $postRestoreValidationSql = @"
+          -- Run 8-thread parallel CRC + checksum scan purely in RAM (zero disk reads)
+          SELECT SUM(CAST(BINARY_CHECKSUM(Payload) AS BIGINT)) + SUM(CAST(CHECKSUM(Payload) AS BIGINT))
+          FROM tempdb.dbo.WarmCache
+          OPTION (MAXDOP 8, RECOMPILE);
+          "@
+
+          $cpuBeforeCheck = Get-SqlCpuSeconds
+          $checkStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+          Invoke-RawSql -Query $postRestoreValidationSql
+          $checkStopwatch.Stop()
+          $cpuAfterCheck = Get-SqlCpuSeconds
+
+          $postRestoreCheckSeconds = [math]::Round($checkStopwatch.Elapsed.TotalSeconds, 3)
+          $postRestoreCheckCpuSeconds = [math]::Round(($cpuAfterCheck - $cpuBeforeCheck), 3)
+
+          # Clean up the tempdb cache table
+          Invoke-RawSql -Query "IF OBJECT_ID('tempdb.dbo.WarmCache') IS NOT NULL DROP TABLE tempdb.dbo.WarmCache;"
+
+          # 8. Calculate total backup size and derived throughput metrics
+          $backupSizeMB = 0
+          1..8 | ForEach-Object {
+              $fileItem = Get-Item "$backupDir\${dbName}_$_.bak"
+              $backupSizeMB += $fileItem.Length
+          }
+          $backupSizeMB = [math]::Round(($backupSizeMB / 1MB), 2)
+          $verifyLogicalThroughputGBps = [math]::Round((100.0 / $verifySeconds), 2)
+
+          # 9. Output Results as JSON for SSM
+          $results = [Ordered]@{
+              InstanceType = "{{launchTargetInstance.InstanceType}}"
+              TestStatus = "Success"
+              Database = $dbName
+              BackupSizeMB = $backupSizeMB
+              DbPopulationSeconds = $dbPopSeconds
+              BackupSeconds = $backupSeconds
+              VerifyOnlySeconds = $verifySeconds
+              VerifyLogicalThroughputGBps = $verifyLogicalThroughputGBps
+              PhysicalRtoSeconds = $rtoSeconds
+              PhysicalRestoreCpuSeconds = $restoreCpuSeconds
+              PostRestoreWarmCheckSeconds = $postRestoreCheckSeconds
+              PostRestoreWarmCheckCpuSeconds = $postRestoreCheckCpuSeconds
+          }
+
+          $results | ConvertTo-Json
+
+  - name: deleteInstance
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      DesiredState: terminated
+      Force: true
+      CheckStateOnly: false
+    nextStep: waitForTermination
+  - name: waitForTermination
+    action: aws:changeInstanceState
+    inputs:
+      InstanceIds:
+        - '{{launchTargetInstance.InstanceId}}'
+      DesiredState: terminated
+      CheckStateOnly: true
+    nextStep: deleteTestSecGroup
+  - name: deleteTestSecGroup
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicySSM
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSecurityGroup
+      GroupId: '{{createTestSecGroup.testGroupId}}'
+  - name: detachRolePolicySSM
+    action: aws:executeAwsApi
+    nextStep: detachRolePolicyCW
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRolePolicyCW
+    action: aws:executeAwsApi
+    nextStep: detachRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DetachRolePolicy
+      PolicyArn: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: detachRole
+    action: aws:executeAwsApi
+    nextStep: deleteRole
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: RemoveRoleFromInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteRole
+    action: aws:executeAwsApi
+    nextStep: deleteInstanceProfile
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteRole
+      RoleName: '{{createInstanceRole.instanceRoleName}}'
+  - name: deleteInstanceProfile
+    action: aws:executeAwsApi
+    nextStep: detachInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: iam
+      Api: DeleteInstanceProfile
+      InstanceProfileName: '{{createInstanceProfile.instanceProfileName}}'
+  - name: detachInternetGateway
+    action: aws:executeAwsApi
+    nextStep: disassociateRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DetachInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+      VpcId: '{{createVpc.vpcId}}'
+  - name: disassociateRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteSubnet
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DisassociateRouteTable
+      AssociationId: '{{associateRouteTable.associationId}}'
+  - name: deleteSubnet
+    action: aws:executeAwsApi
+    nextStep: deleteInternetGateway
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteSubnet
+      SubnetId: '{{createSubnet.subnetId}}'
+  - name: deleteInternetGateway
+    action: aws:executeAwsApi
+    nextStep: deleteRouteTable
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteInternetGateway
+      InternetGatewayId: '{{createInternetGateway.internetGatewayId}}'
+  - name: deleteRouteTable
+    action: aws:executeAwsApi
+    nextStep: deleteVpc
+    isEnd: false
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteRouteTable
+      RouteTableId: '{{createRouteTable.routeTableId}}'
+  - name: deleteVpc
+    action: aws:executeAwsApi
+    isEnd: true
+    onFailure: Abort
+    inputs:
+      Service: ec2
+      Api: DeleteVpc
+      VpcId: '{{createVpc.vpcId}}'
